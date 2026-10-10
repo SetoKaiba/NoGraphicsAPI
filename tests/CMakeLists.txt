@@ -178,10 +178,10 @@ if(APPLE)
             OUTPUT ${output}
             BYPRODUCTS ${output}.air
             COMMAND ${CMAKE_COMMAND} -E make_directory ${output_dir}
-            COMMAND ${NOGRAPHICSAPI_XCRUN} -sdk ${NOGRAPHICSAPI_METAL_SDK} metal -std=metal3.0
-                -target ${NOGRAPHICSAPI_METAL_TARGET} -I ${PROJECT_SOURCE_DIR}/include -c ${source} -o ${output}.air
+            COMMAND ${NOGRAPHICSAPI_XCRUN} -sdk ${NOGRAPHICSAPI_METAL_SDK} metal -std=metal4.0
+                -target ${NOGRAPHICSAPI_METAL_TARGET} -c ${source} -o ${output}.air
             COMMAND ${NOGRAPHICSAPI_XCRUN} -sdk ${NOGRAPHICSAPI_METAL_SDK} metallib ${output}.air -o ${output}
-            DEPENDS ${source} ${ARGN} ${PROJECT_SOURCE_DIR}/include/NoGraphicsAPI/shader_shared.h
+            DEPENDS ${source} ${ARGN}
             VERBATIM
             COMMENT "Compiling native Metal test fixture ${source}"
         )
@@ -219,9 +219,6 @@ if(APPLE)
     target_compile_options(test_metal_presentation PRIVATE -fno-objc-arc)
     target_link_libraries(test_metal_presentation PRIVATE NoGraphicsAPI::NoGraphicsAPI)
     add_test(NAME test_metal_presentation COMMAND test_metal_presentation)
-    add_test(NAME test_metal_presentation_triple COMMAND test_metal_presentation --triple)
-    set_tests_properties(test_metal_presentation test_metal_presentation_triple PROPERTIES
-        SKIP_RETURN_CODE 77 TIMEOUT 60 FAIL_REGULAR_EXPRESSION "Validation Error;NoGraphicsAPI validation:")
 
     add_executable(test_metal_backend metal_backend_test.cpp ${metal_heap_shader} ${metal_draw_shader})
     NoGraphicsAPI_disable_exceptions(test_metal_backend)
@@ -349,6 +346,18 @@ foreach(original IN LISTS buffer_command_tests)
         set_tests_properties(${original}_buffer_commands PROPERTIES TIMEOUT 180)
     endif()
 endforeach()
+
+if(APPLE)
+    foreach(presentation_target IN ITEMS test_metal_presentation test_metal_presentation_buffer_commands)
+        add_test(NAME ${presentation_target}_triple COMMAND ${presentation_target} --triple)
+        add_test(NAME ${presentation_target}_steam_overlay COMMAND ${presentation_target} --steam-overlay)
+        add_test(NAME ${presentation_target}_steam_overlay_triple COMMAND ${presentation_target} --steam-overlay --triple)
+        set_tests_properties(${presentation_target} ${presentation_target}_triple
+            ${presentation_target}_steam_overlay ${presentation_target}_steam_overlay_triple PROPERTIES
+            SKIP_RETURN_CODE 77 TIMEOUT 60 FAIL_REGULAR_EXPRESSION "Validation Error;NoGraphicsAPI validation:"
+            ENVIRONMENT "MTL_DEBUG_LAYER=1;MTL_SHADER_VALIDATION=0")
+    endforeach()
+endif()
 
 if(NOT APPLE)
     add_executable(test_startup_failures startup_failures_test.cpp ${queue_family_spv} ${continuation_vertex_spv} ${continuation_fragment_spv})

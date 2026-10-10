@@ -91,17 +91,16 @@ the [shader guide](docs/slang.md) for complete examples.
 ## Native implementations
 
 Metal exposes native GPU addresses. Metal 4 draw/dispatch commands accept those addresses directly;
-Metal 3 maps command pointers to buffers and offsets. Both use `MTLTextureViewPool` for indexed textures
-on OS 26+; older OS versions use texture resource-ID tables. Vulkan uses device-address commands when available
-and the same buffer mapping otherwise. See [Metal implementation](docs/metal-support.md) and
+Metal 3 maps command pointers to buffers and offsets. Both require `MTLTextureViewPool` for indexed textures.
+Vulkan uses device-address commands when available and the same buffer mapping otherwise. See [Metal implementation](docs/metal-support.md) and
 [Vulkan implementation](docs/vulkan-support.md) for how these map to NoGraphicsAPI.
 
 ## Hardware requirements
 
 ### Metal
 
-Requires macOS 15+ or iOS/iPadOS 18+ and Apple GPU family 7 or newer.
-Metal 4 is selected on supported devices running OS 26+; otherwise the backend uses Metal 3.
+Requires macOS, iOS or iPadOS 26+ and Apple GPU family 7 or newer.
+Metal 4 is selected on supported devices; otherwise the backend uses Metal 3. Both require OS 26+.
 
 | Platform | Supported devices |
 | --- | --- |

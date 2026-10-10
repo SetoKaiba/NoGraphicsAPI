@@ -3,8 +3,8 @@
 Metal implements the same GPU-pointer and descriptor-heap model as [Vulkan](vulkan-support.md).
 The backend uses native Metal commands and precompiled metallibs. Applications own allocation,
 descriptor indices, resource lifetime and synchronization.
-See [supported devices](../README.md#metal) for the hardware baseline. Metal 4 is preferred on supported OS 26+ devices;
-Metal 3 supports macOS 15+ and iOS/iPadOS 18+ on the same Apple GPU baseline.
+See [supported devices](../README.md#metal) for the hardware baseline. Both command backends require
+macOS, iOS or iPadOS 26+; Metal 4 is preferred on supported devices.
 
 ## GPU pointers and address-based commands
 
@@ -36,10 +36,9 @@ Table and residency-set updates are serialized; ordinary command recording and s
 
 ## Application-owned descriptor heaps
 
-On OS 26+, both Metal 3 and Metal 4 texture descriptor heaps use `MTLTextureViewPool`, which provides
+Both Metal 3 and Metal 4 texture descriptor heaps require `MTLTextureViewPool`, which provides
 application-selected slots with contiguous resource IDs. A shader selects a texture by forming a handle from
-**`baseResourceID + index`**, without a per-texture ID-table load. Older OS versions store texture-view resource IDs in an indexed GPU table.
-Both paths use the same shader ABI: buffer slot 1 contains a pool base ID or a pointer to the ID table.
+**`baseResourceID + index`**. Buffer slot 1 contains the 64-bit pool base ID.
 Sampler heaps use an indexed array of eight-byte resource IDs on both versions.
 
 Metal does not expose writable texture-descriptor bytes. The common API therefore exposes opaque
@@ -61,14 +60,13 @@ See [root allocation, lifetime and synchronization](slang.md#root-and-pointer-la
 | Metal buffer slot | Contents |
 | --- | --- |
 | 0 | Root arguments |
-| 1 | `GPUTextureHeap`: texture-view-pool base ID or texture-ID table pointer |
+| 1 | 64-bit texture-view-pool base ID |
 | 2 | Sampler resource IDs |
 
 `GPU_ROOT` reads the application's buffer through Metal's `constant` address space. Root fields follow the
 [shared constant-buffer layout](slang.md#root-and-pointer-layout); pointed-to data retains C POD layout.
 The same Slang sources compile to metallib and SPIR-V. The backend mirrors viewport Y, so vertex and
 mesh clip positions need no platform wrapper. See the [shader guide](slang.md) for layout and compilation.
-Rebuild existing Metal shaders for the shared 16-byte texture-heap header.
 
 ## Mesh work and format support
 
@@ -85,9 +83,11 @@ return `Error::unsupported` for `ColorSpace::extended_srgb_linear`; EDR layer co
 After `wait_idle()`, with no acquired frame, the setter accepts the current format or switches between
 `Format::bgra8_unorm` and `Format::bgra8_srgb` without replacing application resources.
 
-On macOS, Metal 4 rendering hands presentation to a classic Metal command buffer after a GPU shared-event wait.
-This exposes the presentation hook used by Steam's Metal overlay; drawables allow texture views for overlay composition.
-`wait_idle()` drains that presentation queue as well as rendering. iOS retains direct Metal 4 presentation.
+Metal 4 presents directly with framebuffer-only drawables by default. On macOS, set
+`DeviceDesc::steam_overlay_compatibility = true` to allow drawable texture views and use Steam's classic Metal presentation hook.
+Metal 4 rendering then hands presentation to a classic command buffer after a GPU shared-event wait;
+`wait_idle()` drains that presentation queue as well as rendering. This adds a command submission per frame and gives up
+framebuffer-only drawable optimizations. The flag has no effect on Vulkan, iOS or headless devices.
 Use three drawables to keep scanout from starving a two-frame renderer on Apple displays.
 
 ## Synchronization

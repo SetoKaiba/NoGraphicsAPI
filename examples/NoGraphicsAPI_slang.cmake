@@ -52,7 +52,6 @@ function(NoGraphicsAPI_compile_slang output source entry stage)
     set(dependencies ${source} ${SLANG_DEPENDS}
         ${PROJECT_SOURCE_DIR}/include/NoGraphicsAPI/types.h
         ${PROJECT_SOURCE_DIR}/include/NoGraphicsAPI/shader.slang
-        ${PROJECT_SOURCE_DIR}/include/NoGraphicsAPI/shader_shared.h
         ${PROJECT_SOURCE_DIR}/utility/include/NoGraphicsAPIUtility/shader_types.h)
     set(common_options
         -entry ${entry} -stage ${stage}
@@ -71,7 +70,7 @@ function(NoGraphicsAPI_compile_slang output source entry stage)
             COMMAND ${CMAKE_COMMAND} -E make_directory ${output_dir}
             COMMAND ${NOGRAPHICSAPI_SLANGC} ${source} -target metal -DNOGRAPHICSAPI_METAL
                 ${common_options} -o ${output}.metal
-            COMMAND ${NOGRAPHICSAPI_XCRUN} -sdk ${NOGRAPHICSAPI_METAL_SDK} metal -std=metal3.0
+            COMMAND ${NOGRAPHICSAPI_XCRUN} -sdk ${NOGRAPHICSAPI_METAL_SDK} metal -std=metal4.0
                 -target ${NOGRAPHICSAPI_METAL_TARGET} -c ${output}.metal -o ${output}.air
             COMMAND ${NOGRAPHICSAPI_XCRUN} -sdk ${NOGRAPHICSAPI_METAL_SDK} metallib ${output}.air -o ${output}
             DEPENDS ${dependencies}

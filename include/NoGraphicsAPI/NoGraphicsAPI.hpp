@@ -464,6 +464,7 @@ struct DeviceDesc
     Format swapchain_format = Format::undefined;
     ColorSpace swapchain_color_space = ColorSpace::srgb;
     uint32 desired_swapchain_image_count = 2; // Vulkan: 1..8 presentation contexts. Metal clamps to 2..3 drawables.
+    bool steam_overlay_compatibility = false; // macOS only: allow drawable texture views and use classic Metal presentation.
     // Counts are capped to each family's capacity. A nonzero request requires that kind of queue to be available.
     uint32 desired_queue_count = 1; // General graphics + compute queues; must be nonzero.
     uint32 desired_compute_queue_count = 0;

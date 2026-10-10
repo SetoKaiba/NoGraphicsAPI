@@ -5,8 +5,6 @@
 
 #ifdef NOGRAPHICSAPI_METAL
 
-#include <NoGraphicsAPI/shader_shared.h>
-
 #define GPU_ROOT_DEFAULT(type, name) GPU_ROOT_IMPL(type, name, 16)
 #define GPU_ROOT_IMPL(type, name, alignment) \
     [[vk::binding(0)]] ConstantBuffer<type> name##_storage : register(b0); \
@@ -20,7 +18,7 @@ ConstantBuffer<T> gpu_root_aligned_storage<T>(ConstantBuffer<T> storage, constex
     __intrinsic_asm "(__builtin_assume((reinterpret_cast<ulong>($0) & ($1 - 1)) == 0), $0)";
 }
 
-[[vk::binding(1)]] ConstantBuffer<GPUTextureHeap> gpu_texture_heap : register(b1);
+[[vk::binding(1)]] ConstantBuffer<uint64_t> gpu_texture_pool_base : register(b1);
 
 // Metal requires a struct around resource elements in an argument buffer; each sampler still occupies exactly eight bytes.
 __target_intrinsic(metal, "GPUSampler")
@@ -42,7 +40,7 @@ T gpu_texture_from_id<T : IOpaqueDescriptor>(uint64_t resource_id)
 [ForceInline]
 T gpu_texture<T : IOpaqueDescriptor>(uint index)
 {
-    return gpu_texture_from_id<T>(gpu_texture_heap.base != 0 ? gpu_texture_heap.base + uint64_t(index) : gpu_texture_heap.ids[index]);
+    return gpu_texture_from_id<T>(gpu_texture_pool_base + uint64_t(index));
 }
 
 [ForceInline]

@@ -51,10 +51,9 @@ additional pointers inside the root can be selected by GPU work.
 | Target | Root | Texture namespace | Sampler namespace |
 | --- | --- | --- | --- |
 | Vulkan | Uniform buffer at binding 0, mapped to the 64-bit address in push data | Native resource descriptor heap | Native sampler descriptor heap |
-| Metal | `ConstantBuffer<T>` at buffer 0 in the `constant` address space | `GPUTextureHeap` at buffer 1 | Typed sampler entries at buffer 2 |
+| Metal | `ConstantBuffer<T>` at buffer 0 in the `constant` address space | 64-bit texture-pool base at buffer 1 | Typed sampler entries at buffer 2 |
 
-`GPUTextureHeap` contains a 64-bit pool base and a GPU pointer to resource IDs. Both Metal 3 and Metal 4 use
-the base on OS 26+; older OS versions use the table. Rebuild Metal shaders to adopt this shared 16-byte header.
+Both Metal 3 and Metal 4 require OS 26+ and select textures using `baseResourceID + index`.
 
 Roots share a constant-buffer layout on both targets:
 
@@ -101,7 +100,7 @@ This applies to default and explicit viewports; shaders need no Y-flip helper or
 ## Build and stage artifacts
 
 Vulkan requires Slang 2026.14.1+ and SPIRV-Tools 2026.3+. Metal requires stock Slang 2026.18.2+ and
-Xcode 26+; compile Metal 3.0 metallibs for macOS 15+ or iOS 18+ to support both command backends.
+Xcode 26+; compile Metal 4.0 metallibs for macOS or iOS 26+ for both command backends.
 No Slang fork or generated-source rewriting is required.
 Both targets use `-matrix-layout-row-major`; Vulkan additionally requires `-fvk-use-c-layout`.
 
@@ -113,12 +112,12 @@ spirv-val --target-env vulkan1.4 --scalar-block-layout shader.comp.spv
 
 slangc shader.slang -target metal -DNOGRAPHICSAPI_METAL -matrix-layout-row-major \
   -entry computeMain -stage compute -o shader.comp.metal
-xcrun -sdk macosx metal -std=metal3.0 -target air64-apple-macos15.0 -c shader.comp.metal -o shader.comp.air
+xcrun -sdk macosx metal -std=metal4.0 -target air64-apple-macos26.0 -c shader.comp.metal -o shader.comp.air
 xcrun -sdk macosx metallib shader.comp.air -o shader.comp.metallib
 ```
 
-For iOS 18+ device libraries, use `-sdk iphoneos` in both Xcode commands and replace the target with
-`-target air64-apple-ios18.0`. Shared sources and shader metadata stay the same;
+For iOS 26+ device libraries, use `-sdk iphoneos` in both Xcode commands and replace the target with
+`-target air64-apple-ios26.0`. Shared sources and shader metadata stay the same;
 the resulting metallib is specific to its target platform.
 
 Task and mesh Vulkan stages also require `spvMeshShadingEXT`. Entry names are preserved on both

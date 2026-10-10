@@ -1,16 +1,40 @@
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
+#include <TargetConditionals.h>
 #include <stdio.h>
-int main(int argc, char**)
+#include <string.h>
+int main(int argc, char** argv)
 {
     @autoreleasepool
     {
+        gpu::DeviceDesc desc = {};
+        for (gpu::int32 i = 1; i < argc; ++i)
+        {
+            if (strcmp(argv[i], "--triple") == 0) desc.desired_swapchain_image_count = 3;
+            else if (strcmp(argv[i], "--steam-overlay") == 0) desc.steam_overlay_compatibility = true;
+            else { fprintf(stderr, "Unknown option: %s\n", argv[i]); return 1; }
+        }
         CAMetalLayer* layer = [CAMetalLayer new];
         layer.drawableSize = CGSizeMake(16, 16);
-        const gpu::DeviceInit init = gpu::create_device({.window = layer, .desired_swapchain_image_count = argc > 1 ? 3u : 2u});
+        // Initialization must override a conflicting caller-provided layer setting.
+        layer.framebufferOnly = desc.steam_overlay_compatibility ? YES : NO;
+        desc.window = layer;
+        const gpu::DeviceInit init = gpu::create_device(desc);
         if (init.error == gpu::Error::unsupported) { [layer release]; return 77; }
         if (!init.device) { [layer release]; return 1; }
+#if TARGET_OS_OSX
+        if (layer.framebufferOnly != (desc.steam_overlay_compatibility ? NO : YES))
+#else
+        if (!layer.framebufferOnly)
+#endif
+        {
+            fprintf(stderr, "Drawable framebuffer-only setting does not match the requested presentation mode.\n");
+            gpu::wait_idle(init.device);
+            gpu::destroy_device(init.device);
+            [layer release];
+            return 1;
+        }
         if (gpu::get_device_caps(init.device).indirect_mesh_draw != bool([layer.device supportsFamily:MTLGPUFamilyApple9]))
         {
             fprintf(stderr, "Native indirect mesh capability does not match the Metal device.\n");

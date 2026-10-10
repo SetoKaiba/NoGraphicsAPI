@@ -2,11 +2,12 @@
 
 Tested on Apple M3 Max, macOS 26.6.2, Xcode 27 and stock Slang 2026.18.2. The integrating bad_sdf
 application also runs on iPhone 15 Pro. M1/M2 hardware execution remains unverified.
-The full shader checks cover Metal 4. Metal 3 shader/pipeline validation and execution on macOS 15 remain unverified.
+The full shader checks cover Metal 4. Metal 3 shader/pipeline validation remains unverified.
 
 The 9 October macOS presentation checks pass with API validation: two and three drawables, two frames in flight,
 resize after idle, shutdown and forced Metal 3 command encoding. In the integrating game, Steam's Metal overlay
 reports enabled and active after command-buffer presentation; the Metal 4 rendering path remains in use.
+Native validation of the new `steam_overlay_compatibility` init flag remains pending.
 
 ## Running the checks
 
@@ -23,8 +24,9 @@ Add `-E '^test_render_continuation$'` to run the remaining checks separately.
 Coverage includes shared root layouts, GPU pointers, descriptor indexing/copies, direct and indirect
 commands, texture transfers, viewport orientation, presentation and command-pool reuse. Triangle,
 cube and deferred-renderer examples run with Metal API validation.
-The `_buffer_commands` tests force Metal 3 command encoding and exercise texture-view pools on OS 26+,
-or texture resource-ID tables on older supported OS versions.
+The `_buffer_commands` tests force Metal 3 command encoding and exercise the same required texture-view pools.
+Presentation tests cover default and Steam-compatible modes with two and three drawables on both command backends,
+including the layer's framebuffer-only setting. They do not load Steam or validate overlay composition.
 
 ## Concurrency and lifetime
 

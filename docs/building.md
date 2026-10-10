@@ -8,8 +8,8 @@ CMake selects native Metal on Apple platforms and Vulkan elsewhere. Metal 4 is p
 | --- | --- |
 | Windows x86-64 | MSVC or clang-cl. |
 | Linux x86-64 | GCC or Clang; headless library and tests. |
-| macOS 15+ ARM64 | Xcode 26+ SDK and Metal compiler. |
-| iOS/iPadOS 18+ ARM64 | Xcode 26+ with the device SDK. |
+| macOS 26+ ARM64 | Xcode 26+ SDK and Metal compiler. |
+| iOS/iPadOS 26+ ARM64 | Xcode 26+ with the device SDK. |
 
 MinGW, 32-bit targets, and non-Apple ARM targets are unsupported. Apple hardware requirements are listed separately from CPU build architectures.
 
@@ -35,7 +35,7 @@ For iOS, disable desktop examples and tests and select the device SDK:
 
 ```sh
 cmake -S . -B build-ios -G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos \
-  -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=18.0
+  -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=26.0
 cmake --build build-ios --config Release
 ```
 

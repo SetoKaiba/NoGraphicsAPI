@@ -28,9 +28,9 @@ not suballocate application data or track pointer lifetimes.
 
 Textures and samplers occupy application-selected descriptor indices. Opaque heaps provide indexed
 writes, range copies and binding, without descriptor sets, per-material binding tables or pipeline
-resource signatures. Metal uses texture-view pools on OS 26+, texture resource-ID tables on older OS versions,
-and sampler resource IDs. Vulkan uses native `VK_EXT_descriptor_heap` storage. The public contract exposes CPU descriptor operations, not arbitrary
-CPU/GPU descriptor-byte mutation. This retains slot ownership while supporting both representations.
+resource signatures. Metal requires texture-view pools and uses sampler resource IDs. Vulkan uses native
+`VK_EXT_descriptor_heap` storage. The public contract exposes CPU descriptor operations, not arbitrary
+CPU/GPU descriptor-byte mutation. This retains slot ownership on both backends.
 
 Unlike the post's embedded sampler values, sampler indices refer to a separate application-owned
 heap. Texture views can select compatible formats, mip/layer ranges and aspects. Applications own

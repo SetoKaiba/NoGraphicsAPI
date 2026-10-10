@@ -1,5 +1,4 @@
 #include <NoGraphicsAPI/NoGraphicsAPI.hpp>
-#include <NoGraphicsAPI/shader_shared.h>
 #include "BufferAddressMap.hpp"
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -189,7 +188,6 @@ struct TextureDescriptorHeap
     Device* device = nullptr;
     id<MTLTextureViewPool> pool = nil;
     id<MTLBuffer> base = nil;
-    id<MTLTexture>* views = nullptr;
     uint32 capacity = 0;
 };
 
@@ -594,7 +592,7 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
             destroy_device(device);
             return {.error = Error::unsupported};
         }
-        if (@available(macOS 26.0, iOS 26.0, *)) device->metal4 = [device->metal supportsFamily:MTLGPUFamilyMetal4];
+        device->metal4 = [device->metal supportsFamily:MTLGPUFamilyMetal4];
 #if defined(NOGRAPHICSAPI_TEST_BUFFER_COMMANDS)
         device->metal4 = false;
 #endif
@@ -689,8 +687,8 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
             if (device->metal4) [device->queues[0].queue addResidencySet:device->layer.residencySet];
 #if TARGET_OS_OSX
             // Overlay composition creates texture views of the drawable.
-            device->layer.framebufferOnly = NO;
-            if (device->metal4)
+            device->layer.framebufferOnly = desc.steam_overlay_compatibility ? NO : YES;
+            if (desc.steam_overlay_compatibility && device->metal4)
             {
                 device->presentation_queue = [device->metal newCommandQueue];
                 if (!device->presentation_queue)
@@ -700,6 +698,8 @@ DeviceInit create_device(const DeviceDesc& desc) noexcept
                     return {.error = Error::driver_error};
                 }
             }
+#else
+            device->layer.framebufferOnly = YES;
 #endif
         }
         return {.device = device};
@@ -996,32 +996,15 @@ TextureDescriptorHeap* create_texture_descriptor_heap(Device* device, uint32 cap
     @autoreleasepool
     {
         NSError* error = nil;
+        MTLResourceViewPoolDescriptor* desc = [MTLResourceViewPoolDescriptor new];
+        desc.resourceViewCount = capacity;
         TextureDescriptorHeap* result = new TextureDescriptorHeap{.device = device, .capacity = capacity};
-        GPUTextureHeap header = {};
-        if (@available(macOS 26.0, iOS 26.0, *))
-        {
-            MTLResourceViewPoolDescriptor* desc = [MTLResourceViewPoolDescriptor new];
-            desc.resourceViewCount = capacity;
-            result->pool = [device->metal newTextureViewPoolWithDescriptor:desc error:&error];
-            [desc release];
-            if (!result->pool) { report_error("texture descriptor heap", error); delete result; return nullptr; }
-            header.base = result->pool.baseResourceID._impl;
-            assert(header.base);
-        }
-        else result->views = new id<MTLTexture>[capacity]{};
-        result->base = [device->metal newBufferWithLength:sizeof(header) + (result->pool ? 0 : capacity * sizeof(MTLResourceID))
-                                                options:MTLResourceStorageModeShared];
-        if (!result->base)
-        {
-            report_error("texture pool base", nil);
-            [result->pool release];
-            delete[] result->views;
-            delete result;
-            return nullptr;
-        }
-        memset(result->base.contents, 0, result->base.length);
-        if (!result->pool) header.ids = reinterpret_cast<uint64*>(result->base.gpuAddress + sizeof(header));
-        memcpy(result->base.contents, &header, sizeof(header));
+        result->pool = [device->metal newTextureViewPoolWithDescriptor:desc error:&error];
+        [desc release];
+        if (!result->pool) { report_error("texture descriptor heap", error); delete result; return nullptr; }
+        const MTLResourceID base = result->pool.baseResourceID;
+        result->base = [device->metal newBufferWithBytes:&base length:sizeof(base) options:MTLResourceStorageModeShared];
+        if (!result->base) { report_error("texture pool base", nil); [result->pool release]; delete result; return nullptr; }
         add_resident(device, result->base);
         return result;
     }
@@ -1032,11 +1015,6 @@ void destroy_texture_descriptor_heap(TextureDescriptorHeap* heap) noexcept
     @autoreleasepool
     {
         if (!heap) return;
-        if (heap->views)
-        {
-            for (uint32 i = 0; i < heap->capacity; ++i) [heap->views[i] release];
-            delete[] heap->views;
-        }
         remove_resident(heap->device, heap->base);
         [heap->base release];
         [heap->pool release];
@@ -1050,21 +1028,6 @@ void write_texture_descriptor(TextureDescriptorHeap* heap, uint32 index, const T
     @autoreleasepool
     {
         assert(index < heap->capacity && texture->device == heap->device);
-        if (!heap->pool)
-        {
-            MTLPixelFormat format = pixel_format(desc.format == Format::undefined ? texture->desc.format : desc.format);
-            if (desc.aspect == TextureAspect::stencil && texture->desc.format == Format::d32_float_s8_uint) format = MTLPixelFormatX32_Stencil8;
-            MTLTextureType view_type = texture->texture.textureType;
-            if (type == TextureDescriptorType::storage && (view_type == MTLTextureTypeCube || view_type == MTLTextureTypeCubeArray))
-                view_type = MTLTextureType2DArray;
-            id<MTLTexture> view = [texture->texture newTextureViewWithPixelFormat:format textureType:view_type
-                                      levels:NSMakeRange(desc.base_mip, desc.mip_count ? desc.mip_count : texture->desc.mip_levels - desc.base_mip)
-                                      slices:NSMakeRange(desc.base_layer, desc.layer_count ? desc.layer_count : texture->desc.layer_count - desc.base_layer)];
-            [heap->views[index] release];
-            heap->views[index] = view;
-            static_cast<MTLResourceID*>(static_cast<void*>(static_cast<byte*>(heap->base.contents) + sizeof(GPUTextureHeap)))[index] = view.gpuResourceID;
-            return;
-        }
         MTLTextureViewDescriptor* view = [MTLTextureViewDescriptor new];
         view.pixelFormat = pixel_format(desc.format == Format::undefined ? texture->desc.format : desc.format);
         if (desc.aspect == TextureAspect::stencil && texture->desc.format == Format::d32_float_s8_uint)
@@ -1088,21 +1051,6 @@ void copy_texture_descriptors(const TextureDescriptorHeap* source, uint32 source
     {
         assert(source->device == destination->device && source_index + count <= source->capacity && destination_index + count <= destination->capacity);
         if (!count || (source == destination && source_index == destination_index)) return;
-        if (!source->pool)
-        {
-            const bool backwards = source == destination && destination_index > source_index;
-            for (uint32 n = 0; n < count; ++n)
-            {
-                const uint32 i = backwards ? count - 1 - n : n;
-                id<MTLTexture> view = [source->views[source_index + i] retain];
-                [destination->views[destination_index + i] release];
-                destination->views[destination_index + i] = view;
-            }
-            memmove(static_cast<byte*>(destination->base.contents) + sizeof(GPUTextureHeap) + destination_index * sizeof(MTLResourceID),
-                    static_cast<const byte*>(source->base.contents) + sizeof(GPUTextureHeap) + source_index * sizeof(MTLResourceID),
-                    count * sizeof(MTLResourceID));
-            return;
-        }
         if (source == destination && destination_index > source_index && destination_index < source_index + count)
         {
             for (uint32 i = count; i != 0; --i)
