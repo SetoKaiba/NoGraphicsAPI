@@ -115,9 +115,10 @@ in root data; indexed draws bind only the index address range required by Vulkan
 
 Texture and sampler descriptors live in opaque `TextureDescriptorHeap` and `SamplerDescriptorHeap`
 objects created with application-selected slot capacities. `write_texture_descriptor(heap, index, ...)`
-and `write_sampler_descriptor(heap, index, ...)` encode descriptors into private mapped storage.
-`copy_texture_descriptors()` and `copy_sampler_descriptors()` copy indexed ranges synchronously on the CPU,
-including overlapping ranges. Native bytes, strides, reserved regions, and GPU addresses remain private.
+and `write_sampler_descriptor(heap, index, ...)` encode descriptors in a cached CPU array allocated with the heap,
+then copy those bytes to private mapped storage. `copy_texture_descriptors()` and `copy_sampler_descriptors()`
+copy indexed ranges through that CPU array, including overlapping ranges, without reading mapped GPU memory.
+Native bytes, strides, reserved regions, and GPU addresses remain private.
 
 `set_texture_descriptor_heap()` and `set_sampler_descriptor_heap()` bind those heaps. Shaders retain
 native resource and sampler heap access through the shared `gpu_texture` and `gpu_sampler`

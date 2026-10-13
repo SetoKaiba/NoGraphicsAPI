@@ -157,9 +157,9 @@ static bool run_case(Fixture& fixture, uint32 iteration) noexcept
     for (uint32 index = 0; index < data_bytes / 4; ++index)
     {
         valid = reinterpret_cast<const uint32*>(fixture.readback.range.cpu)[index] == (iteration * 1000 + index) * 3 + 7 && valid;
-        const uint8* input = fixture.upload.range.cpu + slot_bytes + index * 4;
         const uint8* pixel = fixture.readback.range.cpu + slot_bytes + index * 4;
-        valid = pixel[0] == input[2] && pixel[1] == input[1] && pixel[2] == input[0] && pixel[3] == input[3] && valid;
+        valid = pixel[0] == uint8(index * 7 + iteration) && pixel[1] == uint8(index * 3 + iteration)
+            && pixel[2] == uint8(index + iteration) && pixel[3] == 255 && valid;
         const uint8* cleared = fixture.readback.range.cpu + 2 * slot_bytes + index * 4;
         valid = cleared[0] == 255 && cleared[1] == 0 && cleared[2] == 0 && cleared[3] == 255 && valid;
     }

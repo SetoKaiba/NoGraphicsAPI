@@ -1134,7 +1134,7 @@ void copy_sampler_descriptors(const SamplerDescriptorHeap* source, uint32 source
             [destination->samplers[destination_index + i] release];
             destination->samplers[destination_index + i] = state;
             static_cast<MTLResourceID*>(destination->buffer.contents)[destination_index + i] =
-                static_cast<const MTLResourceID*>(source->buffer.contents)[source_index + i];
+                state ? state.gpuResourceID : MTLResourceID{};
         }
     }
 }

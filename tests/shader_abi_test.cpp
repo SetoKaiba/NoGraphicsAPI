@@ -28,7 +28,9 @@ static bool test_shader_abi(gpu::Device* device)
     const uint64 stride = (placement.size + placement.align - 1) / placement.align * placement.align;
     const gpu::TextureHeap texture_heap = gpu::create_texture_heap(device, stride * shader_abi_thread_count);
     gpu::Texture* textures[shader_abi_thread_count]{};
-    gpu::TextureDescriptorHeap* views = gpu::create_texture_descriptor_heap(device, shader_abi_thread_count);
+    gpu::TextureDescriptorHeap* views = gpu::create_texture_descriptor_heap(device, shader_abi_thread_count + 1);
+    gpu::TextureDescriptorHeap* source_views = gpu::create_texture_descriptor_heap(device, shader_abi_thread_count);
+    gpu::SamplerDescriptorHeap* source_samplers = gpu::create_sampler_descriptor_heap(device, shader_abi_thread_count);
     gpu::SamplerDescriptorHeap* samplers = gpu::create_sampler_descriptor_heap(device, sampler_count);
     const gpu::GpuHeap upload = gpu::create_gpu_heap(device, 256);
     const gpu::GpuHeap output = gpu::create_gpu_heap(device, 1024, gpu::MemoryType::gpu_only);
@@ -39,11 +41,25 @@ static bool test_shader_abi(gpu::Device* device)
     {
         textures[i] = gpu::create_texture(commands, desc, texture_heap, stride * i);
         if (!textures[i]) return false;
-        gpu::write_texture_descriptor(views, i, textures[i], gpu::TextureDescriptorType::sampled);
-        gpu::write_sampler_descriptor(samplers, sampler_count - shader_abi_thread_count + i,
+        gpu::write_texture_descriptor(source_views, i, textures[i], gpu::TextureDescriptorType::sampled);
+        gpu::write_sampler_descriptor(source_samplers, i,
             {.min_filter = gpu::Filter::nearest, .mag_filter = gpu::Filter::nearest,
              .address_u = (i & 1) ? gpu::AddressMode::repeat : gpu::AddressMode::clamp_to_edge});
         for (uint32 component = 0; component != 8; ++component) upload.range.cpu[i * 8 + component] = byte(17 * i + component + 1);
+    }
+    // GPU sampling checks cross-heap copies, overlapping moves in both directions and overwrites of copied source slots.
+    gpu::copy_texture_descriptors(source_views, 0, views, 0, shader_abi_thread_count);
+    gpu::copy_sampler_descriptors(source_samplers, 0, samplers, sampler_count - shader_abi_thread_count, shader_abi_thread_count);
+    gpu::copy_texture_descriptors(views, 0, views, 1, shader_abi_thread_count);
+    gpu::copy_texture_descriptors(views, 1, views, 0, shader_abi_thread_count);
+    gpu::copy_sampler_descriptors(samplers, sampler_count - shader_abi_thread_count,
+        samplers, sampler_count - shader_abi_thread_count - 1, shader_abi_thread_count);
+    gpu::copy_sampler_descriptors(samplers, sampler_count - shader_abi_thread_count - 1,
+        samplers, sampler_count - shader_abi_thread_count, shader_abi_thread_count);
+    for (uint32 i = 0; i != shader_abi_thread_count; ++i)
+    {
+        gpu::write_texture_descriptor(source_views, i, textures[0], gpu::TextureDescriptorType::sampled);
+        gpu::write_sampler_descriptor(source_samplers, i, {});
     }
     gpu::TimelineSemaphore* timeline = gpu::create_timeline_semaphore(device);
     if (!timeline) return false;
@@ -82,13 +98,15 @@ static bool test_shader_abi(gpu::Device* device)
             valid &= values[i].transformed[row] == root.matrix[row][0] * 2 + root.matrix[row][1] * 3 + root.matrix[row][2] * 5;
         }
         for (uint32 component = 0; component != 4; ++component)
-            valid &= fabsf(sampled[i][component] - float(upload.range.cpu[i * 8 + ((i & 1) ? 0 : 4) + component]) / 255.0f) < 0.00001f;
+            valid &= fabsf(sampled[i][component] - float(byte(17 * i + ((i & 1) ? 0 : 4) + component + 1)) / 255.0f) < 0.00001f;
     }
     gpu::destroy_command_pool(pool);
     gpu::destroy_timeline_semaphore(timeline);
     gpu::destroy_gpu_heap(readback);
     gpu::destroy_gpu_heap(output);
     gpu::destroy_gpu_heap(upload);
+    gpu::destroy_sampler_descriptor_heap(source_samplers);
+    gpu::destroy_texture_descriptor_heap(source_views);
     gpu::destroy_sampler_descriptor_heap(samplers);
     gpu::destroy_texture_descriptor_heap(views);
     for (gpu::Texture* texture : textures) gpu::destroy_texture(texture);

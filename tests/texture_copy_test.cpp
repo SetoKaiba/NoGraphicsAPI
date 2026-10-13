@@ -42,7 +42,7 @@ static bool check(Device* device, TimelineSemaphore* timeline, uint64& value, Te
         const uint32 slice = i / slice_pitch;
         const uint32 in_slice = i % slice_pitch;
         const bool copied = slice < 2 && in_slice / row_pitch < 2 && in_slice % row_pitch < row_bytes;
-        const byte expected = copied ? upload.range.cpu[i] : byte(0xa5);
+        const byte expected = copied ? byte(i * 17 + i / 16) : byte(0xa5);
         if (readback.range.cpu[i] != expected)
         {
             fprintf(stderr, "Texture copy type=%u format=%u at byte %u: got %u, expected %u.\n",

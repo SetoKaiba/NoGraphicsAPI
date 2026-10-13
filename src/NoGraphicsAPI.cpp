@@ -602,6 +602,7 @@ struct TextureDescriptorHeap
 {
     Device* state = nullptr;
     GpuHeap storage = {};
+    byte* descriptors = nullptr;
     uint32 capacity = 0;
 };
 
@@ -609,6 +610,7 @@ struct SamplerDescriptorHeap
 {
     Device* state = nullptr;
     GpuHeap storage = {};
+    byte* descriptors = nullptr;
     uint32 capacity = 0;
 };
 
@@ -2891,6 +2893,7 @@ TextureDescriptorHeap* create_texture_descriptor_heap(Device* device, uint32 cap
         delete heap;
         return nullptr;
     }
+    heap->descriptors = new byte[uint64(capacity) * device->heap_properties.imageDescriptorSize];
     return heap;
 }
 
@@ -2898,6 +2901,7 @@ void destroy_texture_descriptor_heap(TextureDescriptorHeap* heap) noexcept
 {
     if (!heap) return;
     destroy_gpu_heap(heap->storage);
+    delete[] heap->descriptors;
     delete heap;
 }
 
@@ -2914,6 +2918,7 @@ SamplerDescriptorHeap* create_sampler_descriptor_heap(Device* device, uint32 cap
         delete heap;
         return nullptr;
     }
+    heap->descriptors = new byte[uint64(capacity) * device->heap_properties.samplerDescriptorSize];
     return heap;
 }
 
@@ -2921,6 +2926,7 @@ void destroy_sampler_descriptor_heap(SamplerDescriptorHeap* heap) noexcept
 {
     if (!heap) return;
     destroy_gpu_heap(heap->storage);
+    delete[] heap->descriptors;
     delete heap;
 }
 
@@ -2930,9 +2936,12 @@ void copy_texture_descriptors(const TextureDescriptorHeap* source, uint32 source
     assert(source && destination && source->state == destination->state);
     assert(source_index <= source->capacity && count <= source->capacity - source_index);
     assert(destination_index <= destination->capacity && count <= destination->capacity - destination_index);
+    if (!count || (source == destination && source_index == destination_index)) return;
     const uint64 stride = source->state->heap_properties.imageDescriptorSize;
-    memmove(destination->storage.range.cpu + uint64(destination_index) * stride,
-            source->storage.range.cpu + uint64(source_index) * stride, size_t(count * stride));
+    memmove(destination->descriptors + uint64(destination_index) * stride,
+            source->descriptors + uint64(source_index) * stride, size_t(count * stride));
+    memcpy(destination->storage.range.cpu + uint64(destination_index) * stride,
+           destination->descriptors + uint64(destination_index) * stride, size_t(count * stride));
 }
 
 void copy_sampler_descriptors(const SamplerDescriptorHeap* source, uint32 source_index, SamplerDescriptorHeap* destination,
@@ -2941,9 +2950,12 @@ void copy_sampler_descriptors(const SamplerDescriptorHeap* source, uint32 source
     assert(source && destination && source->state == destination->state);
     assert(source_index <= source->capacity && count <= source->capacity - source_index);
     assert(destination_index <= destination->capacity && count <= destination->capacity - destination_index);
+    if (!count || (source == destination && source_index == destination_index)) return;
     const uint64 stride = source->state->heap_properties.samplerDescriptorSize;
-    memmove(destination->storage.range.cpu + uint64(destination_index) * stride,
-            source->storage.range.cpu + uint64(source_index) * stride, size_t(count * stride));
+    memmove(destination->descriptors + uint64(destination_index) * stride,
+            source->descriptors + uint64(source_index) * stride, size_t(count * stride));
+    memcpy(destination->storage.range.cpu + uint64(destination_index) * stride,
+           destination->descriptors + uint64(destination_index) * stride, size_t(count * stride));
 }
 
 void write_texture_descriptor(TextureDescriptorHeap* heap, uint32 index, const Texture* texture, TextureDescriptorType type,
@@ -2997,10 +3009,11 @@ void write_texture_descriptor(TextureDescriptorHeap* heap, uint32 index, const T
         .data = {.pImage = &image_descriptor},
     };
     const VkHostAddressRangeEXT destination{
-        .address = heap->storage.range.cpu + uint64(index) * device->heap_properties.imageDescriptorSize,
+        .address = heap->descriptors + uint64(index) * device->heap_properties.imageDescriptorSize,
         .size = static_cast<size_t>(device->heap_properties.imageDescriptorSize),
     };
     assert_vk(device->fn.write_resource_descriptors(device->device, 1, &descriptor_info, &destination));
+    memcpy(heap->storage.range.cpu + uint64(index) * device->heap_properties.imageDescriptorSize, destination.address, destination.size);
 }
 
 void write_sampler_descriptor(SamplerDescriptorHeap* heap, uint32 index, const SamplerDesc& desc) noexcept
@@ -3022,10 +3035,11 @@ void write_sampler_descriptor(SamplerDescriptorHeap* heap, uint32 index, const S
         .maxLod = VK_LOD_CLAMP_NONE,
     };
     const VkHostAddressRangeEXT destination{
-        .address = heap->storage.range.cpu + uint64(index) * device->heap_properties.samplerDescriptorSize,
+        .address = heap->descriptors + uint64(index) * device->heap_properties.samplerDescriptorSize,
         .size = static_cast<size_t>(device->heap_properties.samplerDescriptorSize),
     };
     assert_vk(device->fn.write_sampler_descriptors(device->device, 1, &sampler_info, &destination));
+    memcpy(heap->storage.range.cpu + uint64(index) * device->heap_properties.samplerDescriptorSize, destination.address, destination.size);
 }
 
 namespace

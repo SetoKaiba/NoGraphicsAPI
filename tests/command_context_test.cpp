@@ -320,7 +320,7 @@ bool test_without_timestamps(uint32 query_count = 0) noexcept
         gpu::read_timestamps(pool);
         gpu::reset_command_pool(pool);
         for (size_t index = 0; index < batch_command_count; ++index)
-            batch_valid = batch_valid && readback_cpu[index * 2] == sentinel && readback_cpu[index * 2 + 1] == source_cpu[index];
+            batch_valid = batch_valid && readback_cpu[index * 2] == sentinel && readback_cpu[index * 2 + 1] == uint64(batch + 1) * 1000 + index;
         batch_valid = batch_valid && readback_cpu[batch_command_count * 2] == sentinel;
         if (!batch_valid) fprintf(stderr, "Command readback with timestamps disabled failed in batch %u.\n", batch);
         valid = valid && batch_valid;
