@@ -1,7 +1,6 @@
 # Metal validation
 
-Tested on Apple M3 Max, macOS 26.6.2, Xcode 27 and stock Slang 2026.18.2. The integrating bad_sdf
-application also runs on iPhone 15 Pro. M1/M2 hardware execution remains unverified.
+Tested on Apple M3 Max, macOS 26.6.2, Xcode 27 and stock Slang 2026.18.2. M1/M2 hardware execution remains unverified.
 The full shader checks cover Metal 4. Metal 3 shader/pipeline validation remains unverified.
 
 The 9 October macOS presentation checks pass with API validation: two and three drawables, two frames in flight,
