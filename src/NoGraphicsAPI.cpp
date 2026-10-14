@@ -2801,15 +2801,15 @@ void destroy_texture(Texture* texture) noexcept
     delete texture;
 }
 
-void activate_texture_alias(CommandBuffer* commands, Texture* texture) noexcept
+void activate_texture_alias(CommandBuffer* commands, Texture* texture, Stage before, Stage after) noexcept
 {
     assert(commands && texture && commands->state == texture->state);
     // The outgoing image can have a different format and size, so its writes need a global memory dependency.
     const VkMemoryBarrier2 memory_barrier{
         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .srcStageMask = to_vk(before),
         .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .dstStageMask = to_vk(after),
         .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
     };
     const VkDependencyInfo dependency{
@@ -2820,9 +2820,9 @@ void activate_texture_alias(CommandBuffer* commands, Texture* texture) noexcept
     vkCmdPipelineBarrier2(commands->command_buffer, &dependency);
     const VkImageMemoryBarrier2 image_barrier{
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .srcStageMask = to_vk(before),
         .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .dstStageMask = to_vk(after),
         .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         .newLayout = VK_IMAGE_LAYOUT_GENERAL,

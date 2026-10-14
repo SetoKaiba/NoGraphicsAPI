@@ -14,10 +14,11 @@ vertex fetch, without buffer descriptors or per-resource binding calls. CPU-visi
 storage; GPU-only heaps use private storage. Textures occupy application-managed placement heaps.
 
 `TextureDesc::aliasable` permits resident textures to share a placement while their GPU uses are
-disjoint. `activate_texture_alias()` issues an all-command barrier with device visibility before
+disjoint. `activate_texture_alias()` issues a barrier with device visibility before
 the incoming alias is cleared or overwritten; prior contents are discarded by contract. Views and
 descriptors stay resident. Cross-queue use requires timeline waits. This uses ordinary placement
 heap aliasing, without `makeAliasable()` or sparse-resource visibility operations.
+Optional `before`/`after` stage masks default to all commands and can narrow the dependency to prior storage accesses and the new alias's first uses.
 
 Metal 4 also accepts GPU addresses in its command API:
 

@@ -744,7 +744,8 @@ void destroy_texture_heap(const TextureHeap& heap) noexcept;
 void destroy_texture(Texture* texture) noexcept;
 // Activate an alias outside a render pass before its first use and whenever another alias has used its storage.
 // Discards contents and synchronizes prior uses on this queue; order other queues with timeline waits. Clear or overwrite before reading.
-void activate_texture_alias(CommandBuffer* commands, Texture* texture) noexcept;
+// before must cover prior accesses to the overlapping storage; after must cover the new alias's first accesses.
+void activate_texture_alias(CommandBuffer* commands, Texture* texture, Stage before = Stage::all_commands, Stage after = Stage::all_commands) noexcept;
 [[nodiscard]] RenderView* create_render_view(Texture* texture, const RenderViewDesc& desc = {}) noexcept;
 void destroy_render_view(RenderView* render_view) noexcept;
 // Descriptor slots form application-owned namespaces. Writes and copies require indices within capacity;

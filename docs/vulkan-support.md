@@ -166,6 +166,8 @@ dependency followed by a whole-image discard transition from `UNDEFINED` to `GEN
 outside rendering, after the previous alias's uses on the same queue; synchronize other queues with
 timeline waits. Clear or overwrite before reading: differently formatted aliases do not preserve
 each other's contents. The application manages overlapping ranges; the backend has no alias registry.
+Optional `before`/`after` stage masks narrow both the global dependency and image transition. They default to `Stage::all_commands`;
+cover every prior access to the overlapping storage and the new alias's first accesses when narrowing them.
 See Vulkan's [memory aliasing rules](https://docs.vulkan.org/spec/latest/chapters/resources.html#resources-memory-aliasing).
 
 ## Root ABI

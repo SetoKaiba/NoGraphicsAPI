@@ -966,11 +966,10 @@ void destroy_texture(Texture* texture) noexcept
     }
 }
 
-void activate_texture_alias(CommandBuffer* commands, Texture* texture) noexcept
+void activate_texture_alias(CommandBuffer* commands, Texture* texture, Stage before, Stage after) noexcept
 {
     assert(commands && texture && commands->device == texture->device && texture->desc.aliasable);
-    barrier(commands, Stage::all_commands, Access::transfer_write | Access::shader_write | Access::color_write | Access::depth_stencil_write,
-        Stage::all_commands, Access::none);
+    barrier(commands, before, Access::transfer_write | Access::shader_write | Access::color_write | Access::depth_stencil_write, after, Access::none);
 }
 
 RenderView* create_render_view(Texture* texture, const RenderViewDesc& desc) noexcept
