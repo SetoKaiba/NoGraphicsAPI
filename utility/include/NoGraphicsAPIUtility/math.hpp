@@ -20,28 +20,32 @@
 #	include <math.h>
 #	include <stddef.h>
 
+#	if defined(__wasm32__)
+	static_assert(sizeof(void*) == 4, "NoGraphicsAPI math requires a 32-bit pointer ABI on wasm32");
+#	else
 	static_assert(sizeof(void*) == 8, "NoGraphicsAPI math requires a 64-bit pointer ABI");
+#	endif
 
 #	if defined(__MINGW32__)
 #		error "NoGraphicsAPI math does not support MinGW"
 #	endif
-#	if defined(_M_ARM64EC) || (!defined(_M_X64) && !defined(__x86_64__) && !(defined(__APPLE__) && defined(__aarch64__)))
-#		error "NoGraphicsAPI math requires x86-64 or Apple ARM64"
-#	endif
-#	if !defined(__aarch64__) && !defined(__AVX2__)
+#	if defined(__EMSCRIPTEN__) && (defined(__wasm32__) || defined(__wasm64__))
+	// Emscripten wasm32 and wasm64 are supported
+#	elif defined(_M_ARM64EC) || (!defined(_M_X64) && !defined(__x86_64__) && !(defined(__APPLE__) && defined(__aarch64__)))
+#		error "NoGraphicsAPI math requires x86-64, Apple ARM64, or Emscripten Wasm32/Wasm64"
+#	elif !defined(__aarch64__) && !defined(__AVX2__)
 #		error "NoGraphicsAPI math requires AVX2"
-#	endif
-#	if !defined(__aarch64__) && (defined(__clang__) || defined(__GNUC__)) && !defined(__FMA__)
+#	elif !defined(__aarch64__) && (defined(__clang__) || defined(__GNUC__)) && !defined(__FMA__)
 #		error "NoGraphicsAPI math requires FMA"
 #	endif
 
-#	if !defined(__aarch64__)
+#	if !defined(__aarch64__) && !defined(__EMSCRIPTEN__)
 #		include <immintrin.h>
 #	endif
 
 namespace NoGraphicsAPI_math_detail {
 
-#	if defined(__aarch64__)
+#	if defined(__aarch64__) || defined(__EMSCRIPTEN__)
 
 	typedef float Simd4 __attribute__((ext_vector_type(4)));
 
@@ -375,7 +379,7 @@ constexpr float3& operator/=(float3& lhs, float rhs) noexcept {
 	return lhs;
 }
 
-#	if defined(__aarch64__)
+#	if defined(__aarch64__) || defined(__EMSCRIPTEN__)
 #	define NOGRAPHICSAPI_FLOAT4_BINARY_OPERATOR(symbol, intrinsic) \
 		constexpr float4 operator symbol(float4 lhs, float4 rhs) noexcept { \
 			if (!__builtin_is_constant_evaluated()) \
@@ -398,7 +402,7 @@ NOGRAPHICSAPI_FLOAT4_BINARY_OPERATOR(/, _mm_div_ps)
 
 #	undef NOGRAPHICSAPI_FLOAT4_BINARY_OPERATOR
 
-#	if defined(__aarch64__)
+#	if defined(__aarch64__) || defined(__EMSCRIPTEN__)
 #	define NOGRAPHICSAPI_FLOAT4_SCALAR_OPERATOR(symbol, intrinsic) \
 		constexpr float4 operator symbol(float4 value, float scalar) noexcept { \
 			if (!__builtin_is_constant_evaluated()) \
@@ -738,7 +742,7 @@ namespace math {
 		return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
 	}
 	constexpr float dot(float4 lhs, float4 rhs) noexcept {
-#		if !defined(__aarch64__)
+#		if !defined(__aarch64__) && !defined(__EMSCRIPTEN__)
 		if (!__builtin_is_constant_evaluated())
 			return _mm_cvtss_f32(_mm_dp_ps(NoGraphicsAPI_math_detail::load(lhs), NoGraphicsAPI_math_detail::load(rhs), 0xf1));
 #		endif

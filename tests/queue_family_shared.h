@@ -11,7 +11,11 @@ struct QueueFamilyRoot
     uint32* destination;
     uint32 source_texture;
     uint32 destination_texture;
+#if defined(__wasm32__)
+    uint32 root_alignment_padding0[4];
+#else
     uint32 root_alignment_padding0[2];
+#endif
 };
 
 #if !defined(__SLANG__)

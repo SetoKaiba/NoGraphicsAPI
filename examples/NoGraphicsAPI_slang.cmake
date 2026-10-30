@@ -1,5 +1,8 @@
 find_program(NOGRAPHICSAPI_SLANGC NAMES slangc REQUIRED)
-if(APPLE)
+if(NOGRAPHICSAPI_USE_WEBGPU)
+    set(NOGRAPHICSAPI_SHADER_EXTENSION wgsl CACHE INTERNAL "Native shader artifact extension" FORCE)
+    set(NOGRAPHICSAPI_SLANG_MINIMUM 2026.18.2)
+elseif(APPLE)
     find_program(NOGRAPHICSAPI_XCRUN NAMES xcrun REQUIRED)
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         set(NOGRAPHICSAPI_METAL_SDK iphoneos)
@@ -40,7 +43,7 @@ endfunction()
 NoGraphicsAPI_require_tool_version(
     "${NOGRAPHICSAPI_SLANGC}" -version Slang ${NOGRAPHICSAPI_SLANG_MINIMUM}
     "([0-9]+\\.[0-9]+(\\.[0-9]+)?)")
-if(NOT APPLE)
+if(NOT APPLE AND NOT EMSCRIPTEN)
     NoGraphicsAPI_require_tool_version(
         "${NOGRAPHICSAPI_SPIRV_VAL}" --version SPIRV-Tools 2026.3
         "SPIRV-Tools v([0-9]+\\.[0-9]+)")
@@ -48,6 +51,9 @@ endif()
 
 function(NoGraphicsAPI_compile_slang output source entry stage)
     cmake_parse_arguments(SLANG "" "" "DEPENDS;DEFINES;OPTIONS" ${ARGN})
+    if(NOGRAPHICSAPI_USE_WEBGPU AND stage STREQUAL "mesh")
+        set(stage "vertex")
+    endif()
     get_filename_component(output_dir "${output}" DIRECTORY)
     set(dependencies ${source} ${SLANG_DEPENDS}
         ${PROJECT_SOURCE_DIR}/include/NoGraphicsAPI/types.h
@@ -63,7 +69,31 @@ function(NoGraphicsAPI_compile_slang output source entry stage)
         list(APPEND common_options -D${define})
     endforeach()
     list(APPEND common_options ${SLANG_OPTIONS})
-    if(APPLE)
+    if(EMSCRIPTEN)
+        list(APPEND common_options -D__EMSCRIPTEN__)
+        if(CMAKE_SIZEOF_VOID_P EQUAL 8 OR "${CMAKE_CXX_FLAGS} ${CMAKE_EXE_LINKER_FLAGS} ${SLANG_DEFINES} ${SLANG_OPTIONS}" MATCHES "MEMORY64=[12]|wasm64")
+            list(APPEND common_options -D__wasm64__)
+        else()
+            list(APPEND common_options -D__wasm32__)
+        endif()
+    endif()
+    if(NOGRAPHICSAPI_USE_WEBGPU)
+        string(TOUPPER "${stage}" stage_upper)
+        string(TOLOWER "${stage}" stage_lower)
+        add_custom_command(
+            OUTPUT ${output}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${output_dir}
+            COMMAND ${NOGRAPHICSAPI_SLANGC} ${source} -target wgsl -DNOGRAPHICSAPI_WEBGPU
+                -fwgsl-bind-bda-buffer 0 0
+                -fvk-invert-y
+                -D__${stage_upper}__ -D__${stage_lower}__
+                -DNOGRAPHICSAPI_STAGE_${stage_upper} -DNOGRAPHICSAPI_STAGE_${stage_lower}
+                ${common_options} -o ${output}
+            DEPENDS ${dependencies}
+            VERBATIM
+            COMMENT "Compiling Slang ${stage} shader ${entry} to WGSL"
+        )
+    elseif(APPLE)
         add_custom_command(
             OUTPUT ${output}
             BYPRODUCTS ${output}.metal ${output}.air
@@ -97,12 +127,31 @@ endfunction()
 
 function(NoGraphicsAPI_add_example target)
     add_executable(${target} ${ARGN})
+    set(embed_deps "")
     foreach(source IN LISTS ARGN)
         if(source MATCHES "\\.slang$")
             set_source_files_properties(${source} PROPERTIES HEADER_FILE_ONLY TRUE)
             source_group("Shaders" FILES ${source})
+        elseif(source MATCHES "\\.(wgsl|rgba8)$")
+            list(APPEND embed_deps "${source}")
         endif()
     endforeach()
     NoGraphicsAPI_disable_exceptions(${target})
     target_link_libraries(${target} PRIVATE NoGraphicsAPI_example_support)
+    if(EMSCRIPTEN)
+        string(REGEX REPLACE "^example_" "" target_short "${target}")
+        set_target_properties(${target} PROPERTIES
+            OUTPUT_NAME "${target_short}"
+            SUFFIX ".html"
+            LINK_DEPENDS "${embed_deps}"
+        )
+        target_link_options(${target} PRIVATE
+            "--use-port=${EMDAWNWEBGPU_PORT}"
+            "-sUSE_WEBGPU=0"
+            "-sDISABLE_EXCEPTION_THROWING=0"
+            "-sALLOW_MEMORY_GROWTH=1"
+            "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString"
+            "--shell-file=${PROJECT_SOURCE_DIR}/examples/common/html_shell.html"
+        )
+    endif()
 endfunction()

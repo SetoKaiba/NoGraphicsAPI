@@ -5,6 +5,41 @@
 
 using namespace gpu;
 
+namespace
+{
+
+struct TriangleFrameState
+{
+    Device* device = nullptr;
+    PSO* triangle_pso = nullptr;
+    TimelinePoint latest_completion{};
+    CommandPool* command_pools[2]{};
+};
+
+void render_triangle_frame(void* user_data) noexcept
+{
+    TriangleFrameState& state = *static_cast<TriangleFrameState*>(user_data);
+    if (state.latest_completion.value >= 2)
+        wait_timeline({.semaphore = state.latest_completion.semaphore, .value = state.latest_completion.value - 1});
+    CommandPool* command_pool = state.command_pools[state.latest_completion.value % 2];
+    reset_command_pool(command_pool);
+    CommandBuffer* commands = begin_commands(command_pool);
+    const SwapchainFrame frame = acquire(commands);
+    if (!frame.render_view)
+        return;
+    begin_render_pass(commands, {
+        .colors = { { .render_view = frame.render_view, .load = LoadOp::clear } },
+    });
+    bind_pso(commands, state.triangle_pso);
+    draw(commands, {}, 3);
+    end_render_pass(commands);
+    end_commands(commands);
+    state.latest_completion.value++;
+    submit_and_present(state.device, {.commands = {commands}, .completion = state.latest_completion});
+}
+
+} // namespace
+
 int main()
 {
     constexpr uint32 width = 512;
@@ -40,27 +75,14 @@ int main()
 
     TimelinePoint latest_completion{ .semaphore = create_timeline_semaphore(device) };
     CommandPool* command_pools[] = {create_command_pool(device), create_command_pool(device)};
+    TriangleFrameState state{
+        .device = device,
+        .triangle_pso = triangle_pso,
+        .latest_completion = latest_completion,
+        .command_pools = {command_pools[0], command_pools[1]},
+    };
 
-    while (pump_example_window(window))
-    {
-        if (latest_completion.value >= 2)
-            wait_timeline({.semaphore = latest_completion.semaphore, .value = latest_completion.value - 1});
-        CommandPool* command_pool = command_pools[latest_completion.value % 2];
-        reset_command_pool(command_pool);
-        CommandBuffer* commands = begin_commands(command_pool);
-        const SwapchainFrame frame = acquire(commands);
-        if (!frame.render_view)
-            continue;
-        begin_render_pass(commands, {
-            .colors = { { .render_view = frame.render_view, .load = LoadOp::clear } },
-        });
-        bind_pso(commands, triangle_pso);
-        draw(commands, {}, 3);
-        end_render_pass(commands);
-        end_commands(commands);
-        latest_completion.value++;
-        submit_and_present(device, {.commands = {commands}, .completion = latest_completion});
-    }
+    run_example_loop(window, render_triangle_frame, &state);
 
     wait_idle(device);
 

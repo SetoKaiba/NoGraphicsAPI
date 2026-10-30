@@ -8,6 +8,9 @@ struct RootDataGenerate
     uint32* dispatch_arguments;
     uint32 first_index;
     uint32 seed;
+#if defined(__wasm32__)
+    uint32 root_alignment_padding0[3];
+#endif
 };
 
 #if !defined(__SLANG__)

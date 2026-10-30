@@ -11,7 +11,11 @@ struct CubeVertex
 struct CubeRootArguments
 {
     CubeVertex* vertices;
+#if defined(__wasm32__)
+    uint32 root_alignment_padding0[3];
+#else
     uint32 root_alignment_padding0[2];
+#endif
     float4x4 transform;
 };
 

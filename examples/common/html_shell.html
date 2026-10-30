@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>NoGraphicsAPI</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: transparent !important;
+      background-color: transparent !important;
+    }
+    #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      border: 0 none;
+      background: transparent !important;
+      background-color: transparent !important;
+      outline: none;
+    }
+    #hud {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      color: #00ff88;
+      font-family: monospace;
+      font-size: 13px;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 4px 8px;
+      border-radius: 4px;
+      pointer-events: none;
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">NoGraphicsAPI (WASM Wire Mode)</div>
+  <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+  <script>
+    var Module = {
+      canvas: (function() { return document.getElementById('canvas'); })(),
+      print: function(text) { console.log(text); },
+      printErr: function(text) { console.error(text); },
+      setStatus: function(text) { if (text) console.log('[Status] ' + text); },
+      onAbort: function(what) { console.error('[ABORT] ' + what); }
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

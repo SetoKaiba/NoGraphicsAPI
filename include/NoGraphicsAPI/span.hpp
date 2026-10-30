@@ -18,6 +18,10 @@ struct Span
 
     constexpr Span(T* values, size_t count) noexcept : data(values), size(count) {}
 
+    template<typename Count>
+        requires(sizeof(size_t) < sizeof(uint64) && detail::is_same_v<Count, uint64>)
+    constexpr Span(T* values, Count count) noexcept : data(values), size(static_cast<size_t>(count)) {}
+
     template<size_t Count>
     constexpr Span(T (&values)[Count]) noexcept : data(values), size(Count) {}
 

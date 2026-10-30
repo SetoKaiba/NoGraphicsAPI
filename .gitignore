@@ -15,3 +15,6 @@ CMakeFiles/
 /compile_commands.json
 /examples/*/shaders/
 /*.ppm
+/.agents/
+__pycache__/
+*.pyc

@@ -12,7 +12,9 @@ add_library(NoGraphicsAPIUtility_math INTERFACE)
 add_library(NoGraphicsAPIUtility::math ALIAS NoGraphicsAPIUtility_math)
 set_target_properties(NoGraphicsAPIUtility_math PROPERTIES EXPORT_NAME math)
 target_link_libraries(NoGraphicsAPIUtility_math INTERFACE NoGraphicsAPIUtility::types)
-if(APPLE AND CMAKE_OSX_ARCHITECTURES MATCHES ";" AND "x86_64" IN_LIST CMAKE_OSX_ARCHITECTURES)
+if(EMSCRIPTEN)
+    # Emscripten uses portable ext_vector_type SIMD without host AVX2/FMA flags.
+elseif(APPLE AND CMAKE_OSX_ARCHITECTURES MATCHES ";" AND "x86_64" IN_LIST CMAKE_OSX_ARCHITECTURES)
     target_compile_options(NoGraphicsAPIUtility_math INTERFACE "SHELL:-Xarch_x86_64 -mavx2" "SHELL:-Xarch_x86_64 -mfma")
 elseif(APPLE AND (CMAKE_OSX_ARCHITECTURES STREQUAL "arm64" OR
                  (NOT CMAKE_OSX_ARCHITECTURES AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")))

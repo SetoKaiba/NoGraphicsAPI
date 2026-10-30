@@ -4,6 +4,9 @@
 struct RootData
 {
     uint32* output;
+#if defined(__wasm32__)
+    uint32 root_alignment_padding0;
+#endif
     uint32 output_index;
     uint32 seed;
     uint32 values[60];

@@ -6,7 +6,11 @@ struct SimulationRoot
 {
     ObjectData* objects;
     float delta_seconds;
+#if defined(__wasm32__)
+    uint32 root_alignment_padding0[2];
+#else
     uint32 root_alignment_padding0;
+#endif
 };
 
 static const uint32 simulation_thread_count = 256;

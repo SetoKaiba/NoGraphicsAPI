@@ -48,3 +48,12 @@ target_compile_definitions(example_deferred_renderer PRIVATE
     NOGRAPHICSAPI_DEFERRED_VERTEX_SHADER_PATH="${deferred_vertex_code}"
     NOGRAPHICSAPI_DEFERRED_FRAGMENT_SHADER_PATH="${deferred_fragment_code}"
 )
+if(EMSCRIPTEN)
+    target_link_options(example_deferred_renderer PRIVATE
+        "--embed-file=${simulation_compute_code}@${simulation_compute_code}"
+        "--embed-file=${gbuffer_mesh_code}@${gbuffer_mesh_code}"
+        "--embed-file=${gbuffer_fragment_code}@${gbuffer_fragment_code}"
+        "--embed-file=${deferred_vertex_code}@${deferred_vertex_code}"
+        "--embed-file=${deferred_fragment_code}@${deferred_fragment_code}"
+    )
+endif()

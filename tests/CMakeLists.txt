@@ -76,7 +76,7 @@ add_executable(test_multithreading multithreading_test.cpp)
 NoGraphicsAPI_disable_exceptions(test_multithreading)
 target_link_libraries(test_multithreading PRIVATE NoGraphicsAPI::NoGraphicsAPI Threads::Threads)
 
-if(NOT APPLE)
+if(NOT APPLE AND NOT NOGRAPHICSAPI_USE_WEBGPU)
     # Manual device-loss reproducer: no library implementation, shaders, or timestamp queries.
     add_executable(repro_queue_device_lost EXCLUDE_FROM_ALL repro_queue_device_lost.cpp)
     set_target_properties(repro_queue_device_lost PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/repro")
@@ -84,7 +84,7 @@ if(NOT APPLE)
     target_compile_features(repro_queue_device_lost PRIVATE cxx_std_20)
     target_include_directories(repro_queue_device_lost PRIVATE ${PROJECT_SOURCE_DIR}/include)
     target_link_libraries(repro_queue_device_lost PRIVATE Vulkan::Vulkan Threads::Threads)
-else()
+elseif(APPLE AND NOT NOGRAPHICSAPI_USE_WEBGPU)
     # Manual native timestamp diagnostic, excluded from normal builds and CTest.
     add_executable(repro_metal_render_timestamps EXCLUDE_FROM_ALL repro_metal_render_timestamps.mm)
     set_target_properties(repro_metal_render_timestamps PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/repro")
@@ -165,7 +165,7 @@ add_test(NAME test_texture_alias COMMAND test_texture_alias)
 set_tests_properties(test_texture_alias PROPERTIES
     SKIP_RETURN_CODE 77 TIMEOUT 60 FAIL_REGULAR_EXPRESSION "Validation Error;NoGraphicsAPI validation:")
 
-if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT NOGRAPHICSAPI_USE_WEBGPU)
     add_executable(test_metal_resource_concurrency metal_resource_concurrency_test.cpp ${queue_family_spv})
     NoGraphicsAPI_disable_exceptions(test_metal_resource_concurrency)
     target_link_libraries(test_metal_resource_concurrency PRIVATE NoGraphicsAPI::NoGraphicsAPI NoGraphicsAPIUtility::types Threads::Threads)
@@ -178,7 +178,7 @@ if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
         ENVIRONMENT "MTL_DEBUG_LAYER=1")
 endif()
 
-if(APPLE)
+if(APPLE AND NOT NOGRAPHICSAPI_USE_WEBGPU)
     function(NoGraphicsAPI_compile_metal_fixture output source)
         get_filename_component(output_dir "${output}" DIRECTORY)
         add_custom_command(
@@ -250,32 +250,34 @@ if(APPLE)
         ENVIRONMENT "MTL_DEBUG_LAYER=1;MTL_SHADER_VALIDATION=1")
 endif()
 
-set(task_shader_code ${CMAKE_CURRENT_BINARY_DIR}/shaders/task_shader.task.${NOGRAPHICSAPI_SHADER_EXTENSION})
-set(task_mesh_code ${CMAKE_CURRENT_BINARY_DIR}/shaders/task_mesh.mesh.${NOGRAPHICSAPI_SHADER_EXTENSION})
-set(task_fragment_code ${CMAKE_CURRENT_BINARY_DIR}/shaders/task_mesh.frag.${NOGRAPHICSAPI_SHADER_EXTENSION})
-NoGraphicsAPI_compile_slang(${task_shader_code} ${CMAKE_CURRENT_SOURCE_DIR}/task_shader.slang taskMain amplification
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/task_shader_shared.h ${CMAKE_CURRENT_SOURCE_DIR}/task_shader_common.h)
-NoGraphicsAPI_compile_slang(${task_mesh_code} ${CMAKE_CURRENT_SOURCE_DIR}/task_mesh.slang meshMain mesh
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/task_mesh_shared.h ${CMAKE_CURRENT_SOURCE_DIR}/task_shader_common.h)
-NoGraphicsAPI_compile_slang(${task_fragment_code} ${CMAKE_CURRENT_SOURCE_DIR}/task_mesh.slang fragmentMain fragment
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/task_mesh_shared.h ${CMAKE_CURRENT_SOURCE_DIR}/task_shader_common.h)
-add_executable(test_task_shader task_shader_test.cpp ${task_shader_code} ${task_mesh_code} ${task_fragment_code})
-NoGraphicsAPI_disable_exceptions(test_task_shader)
-target_link_libraries(test_task_shader PRIVATE NoGraphicsAPI::NoGraphicsAPI NoGraphicsAPIUtility::types)
-target_compile_definitions(test_task_shader PRIVATE
-    NOGRAPHICSAPI_TASK_TEST_TASK_SHADER="${task_shader_code}"
-    NOGRAPHICSAPI_TASK_TEST_MESH_SHADER="${task_mesh_code}"
-    NOGRAPHICSAPI_TASK_TEST_FRAGMENT_SHADER="${task_fragment_code}")
-add_test(NAME test_task_shader COMMAND test_task_shader)
-set_tests_properties(test_task_shader PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60 FAIL_REGULAR_EXPRESSION "Validation Error;NoGraphicsAPI validation:")
+if(NOT NOGRAPHICSAPI_USE_WEBGPU)
+    set(task_shader_code ${CMAKE_CURRENT_BINARY_DIR}/shaders/task_shader.task.${NOGRAPHICSAPI_SHADER_EXTENSION})
+    set(task_mesh_code ${CMAKE_CURRENT_BINARY_DIR}/shaders/task_mesh.mesh.${NOGRAPHICSAPI_SHADER_EXTENSION})
+    set(task_fragment_code ${CMAKE_CURRENT_BINARY_DIR}/shaders/task_mesh.frag.${NOGRAPHICSAPI_SHADER_EXTENSION})
+    NoGraphicsAPI_compile_slang(${task_shader_code} ${CMAKE_CURRENT_SOURCE_DIR}/task_shader.slang taskMain amplification
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/task_shader_shared.h ${CMAKE_CURRENT_SOURCE_DIR}/task_shader_common.h)
+    NoGraphicsAPI_compile_slang(${task_mesh_code} ${CMAKE_CURRENT_SOURCE_DIR}/task_mesh.slang meshMain mesh
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/task_mesh_shared.h ${CMAKE_CURRENT_SOURCE_DIR}/task_shader_common.h)
+    NoGraphicsAPI_compile_slang(${task_fragment_code} ${CMAKE_CURRENT_SOURCE_DIR}/task_mesh.slang fragmentMain fragment
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/task_mesh_shared.h ${CMAKE_CURRENT_SOURCE_DIR}/task_shader_common.h)
+    add_executable(test_task_shader task_shader_test.cpp ${task_shader_code} ${task_mesh_code} ${task_fragment_code})
+    NoGraphicsAPI_disable_exceptions(test_task_shader)
+    target_link_libraries(test_task_shader PRIVATE NoGraphicsAPI::NoGraphicsAPI NoGraphicsAPIUtility::types)
+    target_compile_definitions(test_task_shader PRIVATE
+        NOGRAPHICSAPI_TASK_TEST_TASK_SHADER="${task_shader_code}"
+        NOGRAPHICSAPI_TASK_TEST_MESH_SHADER="${task_mesh_code}"
+        NOGRAPHICSAPI_TASK_TEST_FRAGMENT_SHADER="${task_fragment_code}")
+    add_test(NAME test_task_shader COMMAND test_task_shader)
+    set_tests_properties(test_task_shader PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60 FAIL_REGULAR_EXPRESSION "Validation Error;NoGraphicsAPI validation:")
 
-if(APPLE)
-    # The same MetalTools indirect-mesh validator failure affects Slang-generated task/mesh pipelines.
-    set_tests_properties(test_task_shader PROPERTIES ENVIRONMENT "MTL_SHADER_VALIDATION=0")
-    add_test(NAME test_task_shader_gpu_validation COMMAND test_task_shader --direct-only)
-    set_tests_properties(test_task_shader_gpu_validation PROPERTIES
-        SKIP_RETURN_CODE 77 TIMEOUT 60 FAIL_REGULAR_EXPRESSION "Validation Error;NoGraphicsAPI validation:"
-        ENVIRONMENT "MTL_DEBUG_LAYER=1;MTL_SHADER_VALIDATION=1")
+    if(APPLE)
+        # The same MetalTools indirect-mesh validator failure affects Slang-generated task/mesh pipelines.
+        set_tests_properties(test_task_shader PROPERTIES ENVIRONMENT "MTL_SHADER_VALIDATION=0")
+        add_test(NAME test_task_shader_gpu_validation COMMAND test_task_shader --direct-only)
+        set_tests_properties(test_task_shader_gpu_validation PROPERTIES
+            SKIP_RETURN_CODE 77 TIMEOUT 60 FAIL_REGULAR_EXPRESSION "Validation Error;NoGraphicsAPI validation:"
+            ENVIRONMENT "MTL_DEBUG_LAYER=1;MTL_SHADER_VALIDATION=1")
+    endif()
 endif()
 
 set(root_data_code ${CMAKE_CURRENT_BINARY_DIR}/shaders/root_data.comp.${NOGRAPHICSAPI_SHADER_EXTENSION})
@@ -307,7 +309,7 @@ target_compile_definitions(test_shader_abi PRIVATE NOGRAPHICSAPI_SHADER_ABI_PATH
 add_test(NAME test_shader_abi COMMAND test_shader_abi)
 set_tests_properties(test_shader_abi PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60 FAIL_REGULAR_EXPRESSION "Validation Error;NoGraphicsAPI validation:")
 
-if(NOT APPLE)
+if(NOT APPLE AND NOT NOGRAPHICSAPI_USE_WEBGPU)
     # Compile Vulkan buffer commands separately so production selection prefers native address commands.
     add_library(NoGraphicsAPI_buffer_commands STATIC ${PROJECT_SOURCE_DIR}/${NoGraphicsAPI_backend_source})
     target_compile_features(NoGraphicsAPI_buffer_commands PUBLIC cxx_std_20)
@@ -344,7 +346,7 @@ if(NOT APPLE)
     endforeach()
 endif()
 
-if(APPLE)
+if(APPLE AND NOT NOGRAPHICSAPI_USE_WEBGPU)
     add_test(NAME test_metal_presentation_triple COMMAND test_metal_presentation --triple)
     add_test(NAME test_metal_presentation_steam_overlay COMMAND test_metal_presentation --steam-overlay)
     add_test(NAME test_metal_presentation_steam_overlay_triple COMMAND test_metal_presentation --steam-overlay --triple)
@@ -354,7 +356,7 @@ if(APPLE)
         ENVIRONMENT "MTL_DEBUG_LAYER=1;MTL_SHADER_VALIDATION=0")
 endif()
 
-if(NOT APPLE)
+if(NOT APPLE AND NOT NOGRAPHICSAPI_USE_WEBGPU)
     add_executable(test_startup_failures startup_failures_test.cpp ${queue_family_spv} ${continuation_vertex_spv} ${continuation_fragment_spv})
     NoGraphicsAPI_disable_exceptions(test_startup_failures)
     target_compile_features(test_startup_failures PRIVATE cxx_std_20)
@@ -366,4 +368,19 @@ if(NOT APPLE)
         NOGRAPHICSAPI_FAILURE_FRAGMENT="${continuation_fragment_spv}")
     add_test(NAME test_startup_failures COMMAND test_startup_failures)
     set_tests_properties(test_startup_failures PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60 FAIL_REGULAR_EXPRESSION "Validation Error;NoGraphicsAPI validation:")
+endif()
+
+if(NOGRAPHICSAPI_USE_WEBGPU)
+    if(NOT EMSCRIPTEN)
+        add_executable(test_native_webgpu_e2e e2e/native_webgpu_e2e_test.cpp)
+        NoGraphicsAPI_disable_exceptions(test_native_webgpu_e2e)
+        target_link_libraries(test_native_webgpu_e2e PRIVATE NoGraphicsAPI::NoGraphicsAPI)
+        add_test(NAME test_native_webgpu_e2e COMMAND test_native_webgpu_e2e)
+        set_tests_properties(test_native_webgpu_e2e PROPERTIES
+            SKIP_RETURN_CODE 77 TIMEOUT 60 FAIL_REGULAR_EXPRESSION "Validation Error;NoGraphicsAPI validation:")
+    endif()
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_FOUND)
+        add_test(NAME test_e2e_suite COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/e2e/run_all_tests.py --quick)
+    endif()
 endif()

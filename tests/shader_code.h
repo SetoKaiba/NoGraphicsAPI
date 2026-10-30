@@ -19,7 +19,9 @@ inline gpu::Span<byte> load_test_shader(const char* path) noexcept
     byte* data = static_cast<byte*>(malloc(size_t(size)));
     bool valid = fread(data, 1, size_t(size), file) == size_t(size);
     fclose(file);
-#ifdef __APPLE__
+#if defined(NOGRAPHICSAPI_WEBGPU)
+    valid = valid && memchr(data, 0, size_t(size)) == nullptr;
+#elif defined(__APPLE__)
     valid = valid && memcmp(data, "MTLB", 4) == 0;
 #else
     valid = valid && !(size & 3) && *reinterpret_cast<const uint32*>(data) == 0x07230203u;

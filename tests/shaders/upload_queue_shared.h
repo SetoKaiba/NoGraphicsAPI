@@ -7,7 +7,11 @@ struct UploadQueueRoot
     uint32* source;
     uint32* destination;
     uint32 count;
+#if defined(__wasm32__)
+    uint32 root_alignment_padding0[5];
+#else
     uint32 root_alignment_padding0[3];
+#endif
 };
 
 static const uint32 upload_queue_thread_count = 64;

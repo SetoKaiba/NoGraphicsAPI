@@ -5,12 +5,18 @@ project(NoGraphicsAPI VERSION 0.1.0 LANGUAGES CXX)
 if(MINGW)
     message(FATAL_ERROR "NoGraphicsAPI does not support MinGW")
 endif()
-if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+if(NOT EMSCRIPTEN AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "NoGraphicsAPI requires a 64-bit target")
 endif()
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+
+option(NOGRAPHICSAPI_USE_WEBGPU "Use WebGPU backend (Dawn Native on macOS, Dawn Wire on Emscripten)" OFF)
+if(EMSCRIPTEN)
+    set(NOGRAPHICSAPI_USE_WEBGPU ON CACHE BOOL "Use WebGPU backend on Emscripten" FORCE)
+endif()
+option(NOGRAPHICSAPI_WEBGPU_PERSISTENT_MAP "Enable persistent buffer mapping using Dawn BufferMapExtendedUsages in WebGPU backend" ON)
 
 option(NOGRAPHICSAPI_BUILD_EXAMPLES "Build NoGraphicsAPI examples" OFF)
 option(NOGRAPHICSAPI_BUILD_TESTS "Build NoGraphicsAPI tests" OFF)
@@ -30,7 +36,10 @@ function(NoGraphicsAPI_disable_exceptions target)
     endif()
 endfunction()
 
-if(APPLE)
+if(NOGRAPHICSAPI_USE_WEBGPU)
+    set(NoGraphicsAPI_backend_source src/NoGraphicsAPIWebGPU.cpp)
+    message(STATUS "Using WebGPU backend (Dawn)")
+elseif(APPLE)
     if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
         set(CMAKE_OSX_DEPLOYMENT_TARGET "26.0")
     elseif(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS "26.0")
@@ -64,7 +73,41 @@ target_include_directories(NoGraphicsAPI PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-if(APPLE)
+if(NOGRAPHICSAPI_USE_WEBGPU)
+    target_compile_definitions(NoGraphicsAPI PUBLIC NOGRAPHICSAPI_WEBGPU)
+    if(NOGRAPHICSAPI_WEBGPU_PERSISTENT_MAP)
+        target_compile_definitions(NoGraphicsAPI PUBLIC NOGRAPHICSAPI_WEBGPU_PERSISTENT_MAP)
+    endif()
+    if(EMSCRIPTEN)
+        set(DAWN_DIR "/Volumes/Acer/GFX_Engine/third_party/dawn" CACHE PATH "Path to Dawn repository")
+        set(EMDAWNWEBGPU_PORT "${DAWN_DIR}/cmake-build-wasm-release/emdawnwebgpu_pkg/emdawnwebgpu.port.py"
+            CACHE FILEPATH "Path to emdawnwebgpu Emscripten port")
+        target_compile_options(NoGraphicsAPI PUBLIC "--use-port=${EMDAWNWEBGPU_PORT}")
+        target_link_options(NoGraphicsAPI PUBLIC
+            "--use-port=${EMDAWNWEBGPU_PORT}"
+            "-sUSE_WEBGPU=0"
+            "-sDISABLE_EXCEPTION_THROWING=0"
+            "-sALLOW_MEMORY_GROWTH=1"
+            "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString"
+        )
+    elseif(APPLE)
+        set(DAWN_DIR "/Volumes/Acer/GFX_Engine/third_party/dawn" CACHE PATH "Path to Dawn repository")
+        set(DAWN_MAC_BUILD "${DAWN_DIR}/cmake-build-mac-release")
+        set(DAWN_NATIVE_LIB "${DAWN_MAC_BUILD}/src/dawn/native/libwebgpu_dawn.a")
+        target_include_directories(NoGraphicsAPI PUBLIC
+            ${DAWN_DIR}/include
+            ${DAWN_MAC_BUILD}/gen/include
+        )
+        target_link_libraries(NoGraphicsAPI PUBLIC
+            ${DAWN_NATIVE_LIB}
+            "-framework Metal"
+            "-framework Foundation"
+            "-framework QuartzCore"
+            "-framework IOKit"
+            "-framework IOSurface"
+        )
+    endif()
+elseif(APPLE)
     target_link_libraries(NoGraphicsAPI PRIVATE "-framework Metal" "-framework Foundation" "-framework QuartzCore")
     target_compile_options(NoGraphicsAPI PRIVATE -fno-objc-arc)
 else()

@@ -26,3 +26,11 @@ void read_binary_file(const char* path, Span<byte> data) noexcept
     fread(data.data, 1, data.size, file);
     fclose(file);
 }
+
+#if !defined(__EMSCRIPTEN__)
+void run_example_loop(void* window, ExampleFrameFn frame_fn, void* user_data) noexcept
+{
+    while (pump_example_window(window))
+        frame_fn(user_data);
+}
+#endif

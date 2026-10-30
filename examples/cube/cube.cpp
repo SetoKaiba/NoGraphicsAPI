@@ -71,6 +71,98 @@ namespace {
 	constexpr size_t cube_vertex_count = sizeof(cube_vertices) / sizeof(cube_vertices[0]);
 	constexpr uint32 cube_index_count = uint32(sizeof(cube_indices) / sizeof(cube_indices[0]));
 
+	struct CubeFrameState
+	{
+		Device* device = nullptr;
+		PSO* cube_pso = nullptr;
+		GpuCpuRange<byte> frame_ranges[2]{};
+		GpuCpuRange<CubeVertex> vertex_allocation{};
+		GpuCpuRange<uint16> index_allocation{};
+		TextureDescriptorHeap* texture_descriptor_heap = nullptr;
+		SamplerDescriptorHeap* sampler_descriptor_heap = nullptr;
+		TextureAllocator* texture_allocator = nullptr;
+		PlacedTexture depth{};
+		RenderView* depth_render_view = nullptr;
+		uint32x2 depth_extent{};
+		TimelinePoint latest_completion{};
+		CommandPool* command_pools[2]{};
+		uint64 frame_index = 0;
+		float4x4 view{};
+	};
+
+	void render_cube_frame(void* user_data) noexcept
+	{
+		CubeFrameState& state = *static_cast<CubeFrameState*>(user_data);
+		if (state.latest_completion.value >= 2)
+			wait_timeline({.semaphore = state.latest_completion.semaphore, .value = state.latest_completion.value - 1});
+		BumpAllocator frame_data(state.frame_ranges[state.latest_completion.value % 2]);
+		CommandPool* command_pool = state.command_pools[state.latest_completion.value % 2];
+		reset_command_pool(command_pool);
+		CommandBuffer* commands = begin_commands(command_pool);
+		const SwapchainFrame frame = acquire(commands);
+		if (!frame.render_view)
+			return;
+
+		// Window resize?
+		if (frame.extent.x != state.depth_extent.x || frame.extent.y != state.depth_extent.y)
+		{
+			if (state.depth.texture)
+				wait_timeline(state.latest_completion);
+			destroy_render_view(state.depth_render_view);
+			state.texture_allocator->free(state.depth);
+			state.depth = state.texture_allocator->allocate({
+				.extent = {.x = frame.extent.x, .y = frame.extent.y, .z = 1},
+				.format = Format::d32_float,
+				.usage = TextureUsage::depth_stencil_attachment,
+			});
+			initialize_texture(commands, state.depth.texture);
+			state.depth_render_view = create_render_view(state.depth.texture);
+			state.depth_extent = frame.extent;
+		}
+
+		// Render
+		set_texture_descriptor_heap(commands, state.texture_descriptor_heap);
+		set_sampler_descriptor_heap(commands, state.sampler_descriptor_heap);
+
+		barrier(commands,
+			Stage::depth_stencil_tests, Access::depth_stencil_write,
+			Stage::depth_stencil_tests, Access::depth_stencil_write);
+
+		begin_render_pass(commands, {
+			.colors = { {
+				.render_view = frame.render_view,
+				.load = LoadOp::clear,
+				.clear = { .x = 0.2f, .y = 0.2f, .z = 0.2f, .w = 0.2f },
+			}},
+			.depth = {
+				.render_view = state.depth_render_view,
+				.load = LoadOp::clear,
+				.store = StoreOp::discard,
+			},
+		});
+
+		set_depth_stencil(commands, {.depth_test = true, .depth_write = true});
+		bind_pso(commands, state.cube_pso);
+
+		float4x4 projection = math::perspective_rh_zo(45.0f * math::pi / 180.0f,
+		                                             float(frame.extent.x) / float(frame.extent.y), 0.1f, 100.0f);
+		projection.rows[1].y = -projection.rows[1].y;
+		const GpuCpuRange<CubeRootArguments> root = frame_data.allocate<CubeRootArguments>();
+		*root.cpu = {
+			.vertices = state.vertex_allocation.gpu,
+			.transform = projection * state.view * math::rotation_y(radians_per_frame * float(state.frame_index++)),
+		};
+
+		draw_indexed(commands, root.gpu, gpu_range(state.index_allocation), IndexType::uint16, cube_index_count);
+
+		end_render_pass(commands);
+
+		// Submit
+		end_commands(commands);
+		state.latest_completion.value++;
+		submit_and_present(state.device, {.commands = {commands}, .completion = state.latest_completion});
+	}
+
 } // namespace
 
 int main() {
@@ -151,83 +243,21 @@ int main() {
     uploads.wait();
     uploads.destroy();
 
-	PlacedTexture depth{};
-	RenderView* depth_render_view = nullptr;
-	uint32x2 depth_extent{};
-	uint64 frame_index = 0;
-    const float4x4 view = math::look_at_rh({.x = 0.0f, .y = 3.0f, .z = 5.0f}, {.x = 0.0f, .y = 0.0f, .z = 0.0f}, {.x = 0.0f, .y = 1.0f, .z = 0.0f});
+	CubeFrameState state{
+		.device = device,
+		.cube_pso = cube_pso,
+		.frame_ranges = {frame_ranges[0], frame_ranges[1]},
+		.vertex_allocation = vertex_allocation,
+		.index_allocation = index_allocation,
+		.texture_descriptor_heap = texture_descriptor_heap,
+		.sampler_descriptor_heap = sampler_descriptor_heap,
+		.texture_allocator = &texture_allocator,
+		.latest_completion = latest_completion,
+		.command_pools = {command_pools[0], command_pools[1]},
+		.view = math::look_at_rh({.x = 0.0f, .y = 3.0f, .z = 5.0f}, {.x = 0.0f, .y = 0.0f, .z = 0.0f}, {.x = 0.0f, .y = 1.0f, .z = 0.0f}),
+	};
 
-	while (pump_example_window(window))
-	{
-        if (latest_completion.value >= 2)
-            wait_timeline({.semaphore = latest_completion.semaphore, .value = latest_completion.value - 1});
-        BumpAllocator frame_data(frame_ranges[latest_completion.value % 2]);
-        CommandPool* command_pool = command_pools[latest_completion.value % 2];
-        reset_command_pool(command_pool);
-        CommandBuffer* commands = begin_commands(command_pool);
-        const SwapchainFrame frame = acquire(commands);
-        if (!frame.render_view)
-            continue;
-
-        // Window resize?
-        if (frame.extent.x != depth_extent.x || frame.extent.y != depth_extent.y)
-		{
-			if (depth.texture)
-				wait_timeline(latest_completion);
-			destroy_render_view(depth_render_view);
-			texture_allocator.free(depth);
-			depth = texture_allocator.allocate({
-				.extent = {.x = frame.extent.x, .y = frame.extent.y, .z = 1},
-				.format = Format::d32_float,
-				.usage = TextureUsage::depth_stencil_attachment,
-			});
-			initialize_texture(commands, depth.texture);
-			depth_render_view = create_render_view(depth.texture);
-			depth_extent = frame.extent;
-		}
-
-		// Render
-        set_texture_descriptor_heap(commands, texture_descriptor_heap);
-        set_sampler_descriptor_heap(commands, sampler_descriptor_heap);
-
-		barrier(commands, 
-			Stage::depth_stencil_tests, Access::depth_stencil_write, 
-			Stage::depth_stencil_tests, Access::depth_stencil_write);
-
-		begin_render_pass(commands, {
-			.colors = { {
-				.render_view = frame.render_view,
-				.load = LoadOp::clear,
-				.clear = { .x = 0.2f, .y = 0.2f, .z = 0.2f, .w = 0.2f },
-			}},
-			.depth = {
-				.render_view = depth_render_view,
-				.load = LoadOp::clear,
-				.store = StoreOp::discard,
-			},
-		});
-
-		set_depth_stencil(commands, {.depth_test = true, .depth_write = true});
-		bind_pso(commands, cube_pso);
-
-        float4x4 projection = math::perspective_rh_zo(45.0f * math::pi / 180.0f,
-                                                     float(frame.extent.x) / float(frame.extent.y), 0.1f, 100.0f);
-        projection.rows[1].y = -projection.rows[1].y;
-		const GpuCpuRange<CubeRootArguments> root = frame_data.allocate<CubeRootArguments>();
-        *root.cpu = {
-            .vertices = vertex_allocation.gpu,
-            .transform = projection * view * math::rotation_y(radians_per_frame * float(frame_index++)),
-        };
-
-		draw_indexed(commands, root.gpu, gpu_range(index_allocation), IndexType::uint16, cube_index_count);
-
-		end_render_pass(commands);
-
-        // Submit
-        end_commands(commands);
-        latest_completion.value++;
-		submit_and_present(device, {.commands = {commands}, .completion = latest_completion});
-	}
+	run_example_loop(window, render_cube_frame, &state);
 
     wait_idle(device);
 
@@ -236,8 +266,8 @@ int main() {
 	destroy_command_pool(command_pools[0]);
 	destroy_timeline_semaphore(latest_completion.semaphore);
     destroy_pso(cube_pso);
-	destroy_render_view(depth_render_view);
-	texture_allocator.free(depth);
+	destroy_render_view(state.depth_render_view);
+	texture_allocator.free(state.depth);
 	texture_allocator.free(texture);
     destroy_texture_heap(texture_heap);
 	destroy_sampler_descriptor_heap(sampler_descriptor_heap);

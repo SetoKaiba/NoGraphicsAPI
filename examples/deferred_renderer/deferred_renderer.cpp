@@ -149,6 +149,169 @@ void initialize_object_data(ObjectData* objects) noexcept
     }
 }
 
+struct DeferredFrameState
+{
+    Device* device = nullptr;
+    PSO* simulation_pso = nullptr;
+    PSO* gbuffer_pso = nullptr;
+    PSO* deferred_lighting_pso = nullptr;
+    TextureDescriptorHeap* texture_descriptor_heap = nullptr;
+    GpuCpuRange<byte> frame_ranges[frames_in_flight]{};
+    GpuCpuRange<ObjectData> object_allocation{};
+    TextureAllocator* texture_allocator = nullptr;
+    GBuffer gbuffer{};
+    uint32 descriptor_row = 0;
+    double previous_time = 0.0;
+    float rotation_angle = 0.0f;
+    TimelinePoint latest_completion{};
+    DeleteQueue* delete_queue = nullptr;
+    CommandPool* command_pools[frames_in_flight]{};
+    float4x4 view{};
+    float3 view_right{};
+    float3 view_up{};
+    float3 view_forward{};
+};
+
+void render_deferred_frame(void* user_data) noexcept
+{
+    DeferredFrameState& state = *static_cast<DeferredFrameState*>(user_data);
+
+    // Limit the application to two frames in flight so double-buffered descriptors are safe to reuse
+    if (state.latest_completion.value >= frames_in_flight)
+    {
+        wait_timeline({.semaphore = state.latest_completion.semaphore, .value = state.latest_completion.value - frames_in_flight + 1});
+    }
+    state.delete_queue->tick();
+
+    BumpAllocator frame_data(state.frame_ranges[state.latest_completion.value % frames_in_flight]);
+    CommandPool* command_pool = state.command_pools[state.latest_completion.value % frames_in_flight];
+    reset_command_pool(command_pool);
+    CommandBuffer* commands = begin_commands(command_pool);
+    const SwapchainFrame frame = acquire(commands);
+    if (!frame.render_view)
+        return;
+    const uint32x2 extent = frame.extent;
+
+    // Window resize?
+    if (extent.x != state.gbuffer.width || extent.y != state.gbuffer.height)
+    {
+        if (state.gbuffer.albedo.texture)
+        {
+            state.delete_queue->defer(state.latest_completion.value,
+                [allocator = state.texture_allocator, gbuffer = state.gbuffer]() mutable noexcept { destroy_gbuffer(*allocator, gbuffer); });
+            state.descriptor_row = (state.descriptor_row + 1) % frames_in_flight;
+        }
+        recreate_gbuffer(commands, *state.texture_allocator, state.gbuffer,
+                         state.texture_descriptor_heap, state.descriptor_row * gbuffer_texture_count, extent.x, extent.y);
+    }
+
+    set_texture_descriptor_heap(commands, state.texture_descriptor_heap);
+
+    // Simulation
+    const double current_time = example_time_seconds();
+    const float delta_seconds = float(current_time - state.previous_time);
+    state.previous_time = current_time;
+
+    barrier(commands,
+        Stage::compute | Stage::mesh, Access::shader_write | Access::shader_read,
+        Stage::compute,  Access::shader_read | Access::shader_write);
+
+    bind_pso(commands, state.simulation_pso);
+    const GpuCpuRange<SimulationRoot> simulation_root = frame_data.allocate<SimulationRoot>();
+    *simulation_root.cpu = {
+        .objects = state.object_allocation.gpu,
+        .delta_seconds = delta_seconds,
+    };
+    dispatch(commands, simulation_root.gpu, {.x = object_count / simulation_thread_count, .y = 1, .z = 1});
+
+    // G-buffer
+    barrier(commands,
+        Stage::compute, Access::shader_write,
+        Stage::mesh, Access::shader_read);
+    barrier(commands,
+        Stage::fragment | Stage::color_output | Stage::depth_stencil_tests,
+        Access::shader_read | Access::color_write | Access::depth_stencil_write,
+        Stage::color_output | Stage::depth_stencil_tests, Access::color_write | Access::depth_stencil_write);
+
+    begin_render_pass(commands, {
+        .colors = { {
+                .render_view = state.gbuffer.albedo_render_view,
+                .load = LoadOp::clear,
+            }, {
+                .render_view = state.gbuffer.normal_roughness_render_view,
+                .load = LoadOp::clear,
+            },
+        },
+        .depth = {
+            .render_view = state.gbuffer.depth_render_view,
+            .load = LoadOp::clear,
+        },
+    });
+
+    set_depth_stencil(commands, {.depth_test = true, .depth_write = true});
+    bind_pso(commands, state.gbuffer_pso);
+
+    float4x4 projection = math::perspective_rh_zo(math::pi / 3.0f, float(extent.x) / float(extent.y), 0.3f, 1500.0f);
+    projection.rows[1].y = -projection.rows[1].y;
+    state.rotation_angle += cube_rotation_speed * delta_seconds;
+
+    const GpuCpuRange<GBufferRoot> gbuffer_root = frame_data.allocate<GBufferRoot>();
+    *gbuffer_root.cpu = {
+        .objects = state.object_allocation.gpu,
+        .view_projection = projection * state.view,
+        .orientation = math::to_float3x4(
+            math::rotation_y(state.rotation_angle) *
+            math::rotation_x(state.rotation_angle * 0.5f) *
+            math::scale({.x = cube_scale, .y = cube_scale, .z = cube_scale})),
+    };
+
+    draw_meshlets(commands, gbuffer_root.gpu, {.x = object_grid_width, .y = object_grid_width, .z = 1});
+
+    end_render_pass(commands);
+
+    // Lighting
+    barrier(commands,
+        Stage::color_output | Stage::depth_stencil_tests, Access::color_write | Access::depth_stencil_write,
+        Stage::fragment, Access::shader_read);
+
+    begin_render_pass(commands, {
+        .colors = {{
+            .render_view = frame.render_view,
+            .load = LoadOp::discard,
+        }},
+    });
+
+    bind_pso(commands, state.deferred_lighting_pso);
+
+    const GpuCpuRange<DeferredLightingRoot> deferred_lighting_root = frame_data.allocate<DeferredLightingRoot>();
+    *deferred_lighting_root.cpu = {
+        .camera_position = math::to_float4(camera_position, 1.0f),
+        .ray_center = math::to_float4(state.view_forward),
+        .ray_horizontal = math::to_float4(state.view_right / projection.rows[0].x),
+        .ray_vertical = math::to_float4(state.view_up / projection.rows[1].y),
+        .depth_linearize =
+            {
+                .x = -projection.rows[2].w,
+                .y = -projection.rows[2].z,
+            },
+        .gbuffer_pixel_scale =
+            {
+                .x = float(state.gbuffer.width) / float(frame.extent.x),
+                .y = float(state.gbuffer.height) / float(frame.extent.y),
+            },
+        .gbuffer_texture_base = state.descriptor_row * gbuffer_texture_count,
+    };
+
+    draw(commands, deferred_lighting_root.gpu, 3);
+
+    end_render_pass(commands);
+
+    // Submit
+    end_commands(commands);
+    state.latest_completion.value++;
+    submit_and_present(state.device, {.commands = {commands}, .completion = state.latest_completion});
+}
+
 } // namespace
 
 int main()
@@ -228,151 +391,31 @@ int main()
     const float3 view_right = math::to_float3(view.rows[0]);
     const float3 view_up = math::to_float3(view.rows[1]);
     const float3 view_forward = -math::to_float3(view.rows[2]);
-    GBuffer gbuffer{};
-    uint32 descriptor_row = 0;
-    double previous_time = example_time_seconds();
-    float rotation_angle = 0.0f;
 
     TimelinePoint latest_completion{.semaphore = create_timeline_semaphore(device)};
     DeleteQueue delete_queue(latest_completion.semaphore, frames_in_flight);
     CommandPool* command_pools[frames_in_flight] = {create_command_pool(device), create_command_pool(device)};
 
-    while (pump_example_window(window))
-    {
-        // Limit the application to two frames in flight so double-buffered descriptors are safe to reuse
-        if (latest_completion.value >= frames_in_flight)
-        {
-            wait_timeline({.semaphore = latest_completion.semaphore, .value = latest_completion.value - frames_in_flight + 1});
-        }
-        delete_queue.tick();
+    DeferredFrameState state{
+        .device = device,
+        .simulation_pso = simulation_pso,
+        .gbuffer_pso = gbuffer_pso,
+        .deferred_lighting_pso = deferred_lighting_pso,
+        .texture_descriptor_heap = texture_descriptor_heap,
+        .frame_ranges = {frame_ranges[0], frame_ranges[1]},
+        .object_allocation = object_allocation,
+        .texture_allocator = &texture_allocator,
+        .previous_time = example_time_seconds(),
+        .latest_completion = latest_completion,
+        .delete_queue = &delete_queue,
+        .command_pools = {command_pools[0], command_pools[1]},
+        .view = view,
+        .view_right = view_right,
+        .view_up = view_up,
+        .view_forward = view_forward,
+    };
 
-        BumpAllocator frame_data(frame_ranges[latest_completion.value % frames_in_flight]);
-        CommandPool* command_pool = command_pools[latest_completion.value % frames_in_flight];
-        reset_command_pool(command_pool);
-        CommandBuffer* commands = begin_commands(command_pool);
-        const SwapchainFrame frame = acquire(commands);
-        if (!frame.render_view)
-            continue;
-        const uint32x2 extent = frame.extent;
-
-        // Window resize?
-        if (extent.x != gbuffer.width || extent.y != gbuffer.height)
-        {
-            if (gbuffer.albedo.texture)
-            {
-                delete_queue.defer(latest_completion.value, [&texture_allocator, gbuffer]() mutable noexcept { destroy_gbuffer(texture_allocator, gbuffer); });
-                descriptor_row = (descriptor_row + 1) % frames_in_flight;
-            }
-            recreate_gbuffer(commands, texture_allocator, gbuffer,
-                             texture_descriptor_heap, descriptor_row * gbuffer_texture_count, extent.x, extent.y);
-        }
-
-        set_texture_descriptor_heap(commands, texture_descriptor_heap);
-
-        // Simulation
-        const double current_time = example_time_seconds();
-        const float delta_seconds = float(current_time - previous_time);
-        previous_time = current_time;
-
-        barrier(commands,
-            Stage::compute | Stage::mesh, Access::shader_write | Access::shader_read,
-            Stage::compute,  Access::shader_read | Access::shader_write);
-
-        bind_pso(commands, simulation_pso);
-        const GpuCpuRange<SimulationRoot> simulation_root = frame_data.allocate<SimulationRoot>();
-        *simulation_root.cpu = {
-            .objects = object_allocation.gpu,
-            .delta_seconds = delta_seconds,
-        };
-        dispatch(commands, simulation_root.gpu, {.x = object_count / simulation_thread_count, .y = 1, .z = 1});
-
-        // G-buffer
-        barrier(commands,
-            Stage::compute, Access::shader_write,
-            Stage::mesh, Access::shader_read);
-        barrier(commands,
-            Stage::fragment | Stage::color_output | Stage::depth_stencil_tests,
-            Access::shader_read | Access::color_write | Access::depth_stencil_write,
-            Stage::color_output | Stage::depth_stencil_tests, Access::color_write | Access::depth_stencil_write);
-
-        begin_render_pass(commands, {
-            .colors = { {
-                    .render_view = gbuffer.albedo_render_view,
-                    .load = LoadOp::clear,
-                }, {
-                    .render_view = gbuffer.normal_roughness_render_view,
-                    .load = LoadOp::clear,
-                },
-            },
-            .depth = {
-                .render_view = gbuffer.depth_render_view,
-                .load = LoadOp::clear,
-            },
-        });
-
-        set_depth_stencil(commands, {.depth_test = true, .depth_write = true});
-        bind_pso(commands, gbuffer_pso);
-
-        float4x4 projection = math::perspective_rh_zo(math::pi / 3.0f, float(extent.x) / float(extent.y), 0.3f, 1500.0f);
-        projection.rows[1].y = -projection.rows[1].y;
-        rotation_angle += cube_rotation_speed * delta_seconds;
-
-        const GpuCpuRange<GBufferRoot> gbuffer_root = frame_data.allocate<GBufferRoot>();
-        *gbuffer_root.cpu = {
-            .objects = object_allocation.gpu,
-            .view_projection = projection * view,
-            .orientation = math::to_float3x4(
-                math::rotation_y(rotation_angle) *
-                math::rotation_x(rotation_angle * 0.5f) *
-                math::scale({.x = cube_scale, .y = cube_scale, .z = cube_scale})),
-        };
-
-        draw_meshlets(commands, gbuffer_root.gpu, {.x = object_grid_width, .y = object_grid_width, .z = 1});
-
-        end_render_pass(commands);
-
-        // Lighting
-        barrier(commands,
-            Stage::color_output | Stage::depth_stencil_tests, Access::color_write | Access::depth_stencil_write,
-            Stage::fragment, Access::shader_read);
-
-        begin_render_pass(commands, {
-            .colors = {{
-                .render_view = frame.render_view,
-                .load = LoadOp::discard,
-            }},
-        });
-
-        bind_pso(commands, deferred_lighting_pso);
-
-        const GpuCpuRange<DeferredLightingRoot> deferred_lighting_root = frame_data.allocate<DeferredLightingRoot>();
-        *deferred_lighting_root.cpu = {
-            .camera_position = math::to_float4(camera_position, 1.0f),
-            .ray_center = math::to_float4(view_forward),
-            .ray_horizontal = math::to_float4(view_right / projection.rows[0].x),
-            .ray_vertical = math::to_float4(view_up / projection.rows[1].y),
-            .depth_linearize =
-                {
-                    .x = -projection.rows[2].w,
-                    .y = -projection.rows[2].z,
-                },
-            .gbuffer_pixel_scale =
-                {
-                    .x = float(gbuffer.width) / float(frame.extent.x),
-                    .y = float(gbuffer.height) / float(frame.extent.y),
-                },
-            .gbuffer_texture_base = descriptor_row * gbuffer_texture_count,
-        };
-
-        draw(commands, deferred_lighting_root.gpu, 3);
-
-        end_render_pass(commands);
-
-        // Submit
-        end_commands(commands);
-        latest_completion.value++;
-        submit_and_present(device, {.commands = {commands}, .completion = latest_completion});
-    }
+    run_example_loop(window, render_deferred_frame, &state);
 
     wait_idle(device);
     delete_queue.drain();
@@ -384,7 +427,7 @@ int main()
     destroy_pso(deferred_lighting_pso);
     destroy_pso(gbuffer_pso);
     destroy_pso(simulation_pso);
-    destroy_gbuffer(texture_allocator, gbuffer);
+    destroy_gbuffer(texture_allocator, state.gbuffer);
     destroy_texture_heap(texture_heap);
     destroy_gpu_heap(data_heap);
     destroy_texture_descriptor_heap(texture_descriptor_heap);

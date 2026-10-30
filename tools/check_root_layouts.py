@@ -18,6 +18,7 @@ def run(command):
 
 def structs(text):
     text = re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.S)
+    text = re.sub(r"#if\s+defined\(__wasm32__\).*?(?:#else(.*?))?#endif", lambda m: m.group(1) or "", text, flags=re.S)
     for match in re.finditer(r"\bstruct\s+(?:ROOT_ALIGN\s+)?(\w+)\s*\{", text):
         start = end = match.end()
         depth = 1

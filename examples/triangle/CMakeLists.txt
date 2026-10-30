@@ -16,3 +16,9 @@ target_compile_definitions(example_triangle PRIVATE
     NOGRAPHICSAPI_VERTEX_SHADER_PATH="${vertex_code}"
     NOGRAPHICSAPI_FRAGMENT_SHADER_PATH="${fragment_code}"
 )
+if(EMSCRIPTEN)
+    target_link_options(example_triangle PRIVATE
+        "--embed-file=${vertex_code}@${vertex_code}"
+        "--embed-file=${fragment_code}@${fragment_code}"
+    )
+endif()

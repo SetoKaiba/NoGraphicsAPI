@@ -49,6 +49,39 @@ T gpu_sampler<T : IOpaqueDescriptor = SamplerState>(uint index)
     return gpu_sampler_value<T>(gpu_sampler_heap[index]);
 }
 
+#elif defined(NOGRAPHICSAPI_WEBGPU)
+
+#define NGA_WGSL_DIRECTIVES R"(enable chromium_experimental_resource_table;
+requires immediate_address_space;
+)"
+
+[ForceInline]
+uint __gpu_root_offset()
+{
+    __requirePrelude(NGA_WGSL_DIRECTIVES);
+    __requirePrelude(R"(var<immediate> nga_root_offset : u32;
+)");
+    __intrinsic_asm "(nga_root_offset)";
+}
+
+#define GPU_ROOT_DEFAULT(type, name) GPU_ROOT_IMPL(type, name, 16)
+#define GPU_ROOT_IMPL(type, name, alignment) static type* name = (type*)__gpu_root_offset()
+#define GPU_ADDRESS(value) (&(value))
+
+[ForceInline]
+T gpu_texture<T : IOpaqueDescriptor>(uint index)
+{
+    __requirePrelude(NGA_WGSL_DIRECTIVES);
+    __intrinsic_asm "getResource<$TR>($0)";
+}
+
+[ForceInline]
+T gpu_sampler<T : IOpaqueDescriptor = SamplerState>(uint index)
+{
+    __requirePrelude(NGA_WGSL_DIRECTIVES);
+    __intrinsic_asm "getResource<$TR>($0 + 32768u)";
+}
+
 #else
 
 #define GPU_ROOT_DEFAULT(type, name) GPU_ROOT_IMPL(type, name, 16)
@@ -75,6 +108,7 @@ uint gpu_nonuniform_index(uint index)
     __target_switch
     {
     case metal: return index;
+    case wgsl: return index;
     default: return NonUniformResourceIndex(index);
     }
 }

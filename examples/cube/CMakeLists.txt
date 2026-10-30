@@ -32,3 +32,11 @@ target_compile_definitions(example_cube PRIVATE
     NOGRAPHICSAPI_CUBE_FRAGMENT_SHADER_PATH="${fragment_code}"
     NOGRAPHICSAPI_CUBE_TEXTURE_PATH="${texture}"
 )
+if(EMSCRIPTEN)
+    target_link_options(example_cube PRIVATE
+        "--embed-file=${vertex_code}@${vertex_code}"
+        "--embed-file=${fragment_code}@${fragment_code}"
+        "--embed-file=${texture}@${texture}"
+        "--embed-file=${texture}@lunarg_logo_256x256.rgba8"
+    )
+endif()

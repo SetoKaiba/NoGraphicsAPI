@@ -11,3 +11,6 @@ double example_time_seconds() noexcept;
 void* open_example_window(const char* title, uint32 width, uint32 height) noexcept;
 bool pump_example_window(void* window) noexcept;
 void close_example_window(void*& window) noexcept;
+
+using ExampleFrameFn = void (*)(void* user_data) noexcept;
+void run_example_loop(void* window, ExampleFrameFn frame_fn, void* user_data) noexcept;
